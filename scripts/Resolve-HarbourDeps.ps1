@@ -128,6 +128,40 @@ function Test-HeaderInRoot {
    }
 }
 
+function Test-DependencyEnvRoot {
+   param(
+      [Parameter(Mandatory = $true)][string] $Root,
+      [string] $InstalledRoot
+   )
+
+   if ([string]::IsNullOrWhiteSpace($Root)) {
+      return $false
+   }
+
+   if ([string]::IsNullOrWhiteSpace($InstalledRoot) -or -not [System.IO.Path]::IsPathRooted($Root)) {
+      return $true
+   }
+
+   try {
+      $trimChars = [char[]] '\/'
+      $installedRootFull = [System.IO.Path]::GetFullPath($InstalledRoot).TrimEnd($trimChars)
+      $installedParent = [System.IO.Path]::GetFullPath((Split-Path -Parent $installedRootFull)).TrimEnd($trimChars)
+      $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd($trimChars)
+      $installedParentPrefix = "$installedParent\"
+      $installedRootPrefix = "$installedRootFull\"
+
+      if ($rootFull.StartsWith($installedParentPrefix, [System.StringComparison]::OrdinalIgnoreCase) -and
+          -not ($rootFull.Equals($installedRootFull, [System.StringComparison]::OrdinalIgnoreCase) -or
+             $rootFull.StartsWith($installedRootPrefix, [System.StringComparison]::OrdinalIgnoreCase))) {
+         return $false
+      }
+   }
+   catch {
+   }
+
+   return $true
+}
+
 function Find-Dependency {
    param(
       [Parameter(Mandatory = $true)] $DependencyConfig,
@@ -138,7 +172,7 @@ function Find-Dependency {
    $envVar = [string] $DependencyConfig.envVar
    if (-not [string]::IsNullOrWhiteSpace($envVar)) {
       $current = [System.Environment]::GetEnvironmentVariable($envVar, 'Process')
-      if (-not [string]::IsNullOrWhiteSpace($current)) {
+      if (-not [string]::IsNullOrWhiteSpace($current) -and (Test-DependencyEnvRoot -Root $current -InstalledRoot $InstalledRoot)) {
          $roots.Add($current)
       }
    }

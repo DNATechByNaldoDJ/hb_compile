@@ -20,7 +20,10 @@ Harbour.
 ## Estrutura
 
 - `config\profiles.json`: perfis de compilacao e origem padrao do Harbour.
+- `config\dependencies.json`: catalogo de dependencias opcionais usadas no modo `-Full`.
 - `config\external-deps.example.ps1`: modelo para dependencias opcionais `HB_WITH_*`.
+- `DEPENDENCIES.md`: guia de dependencias, conjuntos e wrappers full.
+- `OPENADS.md`: detalhes do fallback OpenADS usado pelo contrib `rddads`.
 - `scripts\Invoke-HarbourBuild.ps1`: executor principal.
 - `scripts\Bootstrap-Tools.ps1`: baixa ferramentas locais, hoje focado em Zig.
 - `scripts\Show-Status.ps1`: mostra HarbourRoot, Zig, win-make e saidas.
@@ -100,6 +103,15 @@ Para forcar compiladores comuns:
 ```powershell
 .\build-msvc64.ps1 -Clean
 .\build-mingw64.ps1 -Clean
+```
+
+Os mesmos perfis tambem tem wrappers em modo full, que preparam dependencias
+opcionais antes do build:
+
+```powershell
+.\build-full-standard.ps1 -Clean
+.\build-full-msvc64.ps1 -Clean
+.\build-full-mingw64.ps1 -Clean
 ```
 
 O perfil `msvc64` tenta carregar automaticamente o ambiente do Visual Studio
@@ -205,6 +217,14 @@ Instalar dependencias automatizaveis e compilar com Zig:
 .\build-full-zig.ps1 -Clean
 ```
 
+Wrappers equivalentes existem para os outros perfis comuns:
+
+```powershell
+.\build-full-msvc64.ps1 -Clean
+.\build-full-mingw64.ps1 -Clean
+.\build-full-standard.ps1 -Clean
+```
+
 Somente preparar dependencias de rede:
 
 ```powershell
@@ -218,7 +238,9 @@ OpenADS como fallback de codigo-fonte, clonando
 `https://github.com/FiveTechSoft/OpenADS.git` em `scratch\openads` e apontando
 `HB_WITH_ADS` para `scratch\openads\include\openads`.
 Para executar ou linkar aplicacoes com `rddads`, use tambem a DLL/import lib do
-OpenADS correspondente ao compilador/alvo (`ace64` ou `ace32`).
+OpenADS correspondente ao compilador/alvo (`ace64` ou `ace32`). Veja
+`OPENADS.md` para os ajustes locais de compatibilidade e `DEPENDENCIES.md` para
+o fluxo completo de dependencias.
 
 Algumas outras continuam marcadas como manuais porque envolvem SDK proprietario
 ou versao legada especifica que o Harbour espera, como OCILIB/Oracle, Blat e
