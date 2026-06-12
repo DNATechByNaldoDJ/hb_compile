@@ -1,0 +1,267 @@
+{
+  "defaultProvider": "vcpkg",
+  "defaultTriplet": "x64-windows",
+  "sets": {
+    "full": [
+      "openssl",
+      "curl",
+      "mysql",
+      "pgsql",
+      "qt",
+      "cairo",
+      "freeimage",
+      "gd",
+      "libmagic",
+      "firebird",
+      "ghostscript",
+      "allegro",
+      "blat",
+      "ads",
+      "ocilib"
+    ],
+    "network": [
+      "openssl",
+      "curl"
+    ],
+    "database": [
+      "mysql",
+      "pgsql",
+      "firebird",
+      "ads",
+      "ocilib"
+    ],
+    "gui": [
+      "qt",
+      "allegro"
+    ],
+    "graphics": [
+      "cairo",
+      "freeimage",
+      "gd",
+      "ghostscript"
+    ]
+  },
+  "dependencies": {
+    "openssl": {
+      "displayName": "OpenSSL",
+      "envVar": "HB_WITH_OPENSSL",
+      "headers": [
+        "openssl/ssl.h"
+      ],
+      "setTo": "includeRoot",
+      "vcpkgPorts": [
+        "openssl"
+      ],
+      "dllPatterns": [
+        "libssl*.dll",
+        "libcrypto*.dll"
+      ]
+    },
+    "curl": {
+      "displayName": "libcurl",
+      "envVar": "HB_WITH_CURL",
+      "headers": [
+        "curl/curl.h"
+      ],
+      "setTo": "includeRoot",
+      "vcpkgPorts": [
+        "curl"
+      ],
+      "dllPatterns": [
+        "libcurl*.dll"
+      ]
+    },
+    "mysql": {
+      "displayName": "MySQL client",
+      "envVar": "HB_WITH_MYSQL",
+      "headers": [
+        "mysql/mysql.h",
+        "mysql.h"
+      ],
+      "setTo": "headerDir",
+      "vcpkgPorts": [
+        "libmysql"
+      ],
+      "dllPatterns": [
+        "libmysql.dll",
+        "libmariadb.dll"
+      ]
+    },
+    "pgsql": {
+      "displayName": "PostgreSQL libpq",
+      "envVar": "HB_WITH_PGSQL",
+      "headers": [
+        "libpq-fe.h",
+        "postgresql/libpq-fe.h"
+      ],
+      "setTo": "headerDir",
+      "vcpkgPorts": [
+        "libpq"
+      ],
+      "dllPatterns": [
+        "libpq.dll"
+      ]
+    },
+    "qt": {
+      "displayName": "Qt 6",
+      "envVar": "HB_WITH_QT",
+      "headers": [
+        "QtCore/QAdoptSharedDataTag",
+        "QtCore/QJsonObject"
+      ],
+      "setTo": "includeRoot",
+      "vcpkgPorts": [
+        "qtbase"
+      ],
+      "extraEnv": {
+        "QT_SELECT": "6"
+      },
+      "tools": [
+        {
+          "name": "moc.exe",
+          "envVar": "HB_QTPATH",
+          "directories": [
+            "tools/Qt6/bin",
+            "tools/qt6/bin",
+            "bin"
+          ]
+        }
+      ],
+      "dllPatterns": [
+        "Qt6Core.dll",
+        "Qt6Gui.dll",
+        "Qt6Widgets.dll"
+      ]
+    },
+    "cairo": {
+      "displayName": "Cairo",
+      "envVar": "HB_WITH_CAIRO",
+      "headers": [
+        "cairo/cairo.h",
+        "cairo.h"
+      ],
+      "setTo": "headerDir",
+      "vcpkgPorts": [
+        "cairo"
+      ],
+      "dllPatterns": [
+        "cairo*.dll",
+        "libcairo*.dll"
+      ]
+    },
+    "freeimage": {
+      "displayName": "FreeImage",
+      "envVar": "HB_WITH_FREEIMAGE",
+      "headers": [
+        "FreeImage.h"
+      ],
+      "setTo": "includeRoot",
+      "vcpkgPorts": [
+        "freeimage"
+      ],
+      "dllPatterns": [
+        "FreeImage.dll",
+        "freeimage.dll"
+      ]
+    },
+    "gd": {
+      "displayName": "GD Graphics Library",
+      "envVar": "HB_WITH_GD",
+      "headers": [
+        "gd.h"
+      ],
+      "setTo": "includeRoot",
+      "vcpkgPorts": [
+        "libgd"
+      ],
+      "autoInstall": false,
+      "note": "O Harbour no Windows procura a biblioteca bgd; confirme o nome gerado pela distribuicao antes de habilitar."
+    },
+    "libmagic": {
+      "displayName": "libmagic",
+      "envVar": "HB_WITH_LIBMAGIC",
+      "headers": [
+        "magic.h"
+      ],
+      "setTo": "includeRoot",
+      "vcpkgPorts": [
+        "libmagic"
+      ]
+    },
+    "firebird": {
+      "displayName": "Firebird client",
+      "envVar": "HB_WITH_FIREBIRD",
+      "headers": [
+        "ibase.h",
+        "firebird/ibase.h"
+      ],
+      "setTo": "headerDir",
+      "autoInstall": false,
+      "note": "Pode exigir o client oficial do Firebird para obter fbclient.dll/fbclient_ms.lib compativeis."
+    },
+    "ghostscript": {
+      "displayName": "Ghostscript",
+      "envVar": "HB_WITH_GS",
+      "headers": [
+        "iapi.h",
+        "ghostscript/iapi.h"
+      ],
+      "setTo": "headerDir",
+      "autoInstall": false,
+      "extraTool": {
+        "envVar": "HB_WITH_GS_BIN",
+        "patterns": [
+          "gsdll64.dll",
+          "gsdll32.dll"
+        ]
+      },
+      "note": "Instale o SDK/binario do Ghostscript e aponte HB_WITH_GS e HB_WITH_GS_BIN."
+    },
+    "allegro": {
+      "displayName": "Allegro 4.x",
+      "envVar": "HB_WITH_ALLEGRO",
+      "headers": [
+        "allegro.h"
+      ],
+      "setTo": "includeRoot",
+      "autoInstall": false,
+      "note": "gtalleg usa Allegro 4/alleg42; Allegro 5 moderno normalmente nao e compativel."
+    },
+    "blat": {
+      "displayName": "Blat",
+      "envVar": "HB_WITH_BLAT",
+      "headers": [
+        "blat.h"
+      ],
+      "setTo": "includeRoot",
+      "autoInstall": false,
+      "note": "Informe a pasta do fonte completo do Blat."
+    },
+    "ads": {
+      "displayName": "Advantage Database Server SDK",
+      "envVar": "HB_WITH_ADS",
+      "headers": [
+        "ace.h"
+      ],
+      "setTo": "includeRoot",
+      "autoInstall": false,
+      "sourceFallback": {
+        "displayName": "OpenADS",
+        "repository": "https://github.com/FiveTechSoft/OpenADS.git",
+        "root": "scratch\\openads",
+        "includeRoot": "include\\openads"
+      },
+      "note": "SDK proprietario descontinuado; se nao for encontrado, -Install usa OpenADS como fallback."
+    },
+    "ocilib": {
+      "displayName": "OCILIB / Oracle",
+      "envVar": "HB_WITH_OCILIB",
+      "headers": [
+        "ocilib.h"
+      ],
+      "setTo": "includeRoot",
+      "autoInstall": false,
+      "note": "Normalmente depende tambem do Oracle Client/Instant Client."
+    }
+  }
+}

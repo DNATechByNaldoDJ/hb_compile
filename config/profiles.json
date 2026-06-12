@@ -1,0 +1,135 @@
+{
+  "harbourRepository": "https://github.com/harbour/core.git",
+  "harbourRoot": "scratch\\harbour-core",
+  "outputRoot": "out",
+  "logsRoot": "logs",
+  "toolsRoot": "tools",
+  "defaultJobs": 8,
+  "profiles": {
+    "auto": {
+      "description": "Usa a autodeteccao padrao do Harbour/win-make, sem forcar compilador.",
+      "installSubdir": "auto",
+      "env": {}
+    },
+    "mingw64": {
+      "description": "Build Windows x64 usando MinGW-w64 ja disponivel no PATH.",
+      "installSubdir": "mingw64",
+      "env": {
+        "HB_PLATFORM": "win",
+        "HB_COMPILER": "mingw64",
+        "HB_CPU": "x86_64"
+      }
+    },
+    "msvc64": {
+      "description": "Build Windows x64 usando Microsoft Visual C++.",
+      "installSubdir": "msvc64",
+      "autoVsDevShell": true,
+      "env": {
+        "HB_PLATFORM": "win",
+        "HB_COMPILER": "msvc64",
+        "HB_CPU": "x86_64"
+      }
+    },
+    "zig": {
+      "description": "Build nativo Windows usando Zig como frontend C.",
+      "installSubdir": "zig",
+      "requires": [
+        "zig"
+      ],
+      "env": {
+        "HB_PLATFORM": "win",
+        "HB_COMPILER": "zig"
+      }
+    },
+    "zig-win64-gnu": {
+      "description": "Build Windows x64 via Zig com alvo x86_64-windows-gnu.",
+      "installSubdir": "zig-win64-gnu",
+      "requires": [
+        "zig"
+      ],
+      "env": {
+        "HB_PLATFORM": "win",
+        "HB_COMPILER": "zig",
+        "HB_ZIG_TARGET": "x86_64-windows-gnu",
+        "HB_CPU": "x86_64",
+        "HB_BUILD_NAME": "64gnu"
+      }
+    },
+    "zig-win64-msvc": {
+      "description": "Build Windows x64 via Zig com alvo x86_64-windows-msvc.",
+      "installSubdir": "zig-win64-msvc",
+      "requires": [
+        "zig"
+      ],
+      "env": {
+        "HB_PLATFORM": "win",
+        "HB_COMPILER": "zig",
+        "HB_ZIG_TARGET": "x86_64-windows-msvc",
+        "HB_CPU": "x86_64",
+        "HB_BUILD_NAME": "64msvc"
+      }
+    },
+    "zig-win32-gnu": {
+      "description": "Cross-build Windows x86 via Zig; requer um build nativo para HB_HOST_BIN.",
+      "installSubdir": "zig-win32-gnu",
+      "hostBinProfile": "zig",
+      "requires": [
+        "zig"
+      ],
+      "env": {
+        "HB_PLATFORM": "win",
+        "HB_COMPILER": "zig",
+        "HB_ZIG_TARGET": "x86-windows-gnu",
+        "HB_CPU": "x86",
+        "HB_BUILD_NAME": "x86gnu"
+      }
+    },
+    "zig-win-arm64": {
+      "description": "Cross-build Windows ARM64 via Zig; requer um build nativo para HB_HOST_BIN.",
+      "installSubdir": "zig-win-arm64",
+      "hostBinProfile": "zig",
+      "requires": [
+        "zig"
+      ],
+      "env": {
+        "HB_PLATFORM": "win",
+        "HB_COMPILER": "zig",
+        "HB_ZIG_TARGET": "aarch64-windows",
+        "HB_CPU": "arm64",
+        "HB_BUILD_NAME": "arm64"
+      }
+    },
+    "zig-linux-x64": {
+      "description": "Cross-build Linux x64 via Zig; requer um build nativo para HB_HOST_BIN.",
+      "installSubdir": "zig-linux-x64",
+      "hostBinProfile": "zig",
+      "requires": [
+        "zig"
+      ],
+      "env": {
+        "HB_PLATFORM": "linux",
+        "HB_COMPILER": "zig",
+        "HB_ZIG_TARGET": "x86_64-linux-gnu",
+        "HB_CPU": "x86_64",
+        "HB_BUILD_NAME": "linux64",
+        "HB_USER_CFLAGS": "-fPIC"
+      }
+    },
+    "zig-linux-arm64": {
+      "description": "Cross-build Linux ARM64 via Zig; requer um build nativo para HB_HOST_BIN.",
+      "installSubdir": "zig-linux-arm64",
+      "hostBinProfile": "zig",
+      "requires": [
+        "zig"
+      ],
+      "env": {
+        "HB_PLATFORM": "linux",
+        "HB_COMPILER": "zig",
+        "HB_ZIG_TARGET": "aarch64-linux-gnu",
+        "HB_CPU": "arm64",
+        "HB_BUILD_NAME": "linuxarm64",
+        "HB_USER_CFLAGS": "-fPIC"
+      }
+    }
+  }
+}

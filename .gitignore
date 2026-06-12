@@ -1,0 +1,11 @@
+/.vscode/
+/logs/*
+!/logs/.gitkeep
+/out/*
+!/out/.gitkeep
+/tools/*
+!/tools/.gitkeep
+/scratch/*
+!/scratch/.gitkeep
+/config/external-deps.generated.ps1
+/config/external-deps.local.ps1
