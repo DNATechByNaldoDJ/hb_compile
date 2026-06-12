@@ -55,6 +55,10 @@
       "dllPatterns": [
         "libssl*.dll",
         "libcrypto*.dll"
+      ],
+      "requiredDllPatterns": [
+        "libssl*.dll",
+        "libcrypto*.dll"
       ]
     },
     "curl": {
@@ -105,6 +109,9 @@
     "qt": {
       "displayName": "Qt 6",
       "envVar": "HB_WITH_QT",
+      "triplet": "x64-windows-no-dwm",
+      "installTimeoutMinutes": 360,
+      "overlayTriplets": "triplets/custom",
       "headers": [
         "QtCore/QAdoptSharedDataTag",
         "QtCore/QJsonObject"
@@ -125,9 +132,30 @@
             "tools/qt6/bin",
             "bin"
           ]
+        },
+        {
+          "name": "uic.exe",
+          "directories": [
+            "tools/Qt6/bin",
+            "tools/qt6/bin",
+            "bin"
+          ]
+        },
+        {
+          "name": "rcc.exe",
+          "directories": [
+            "tools/Qt6/bin",
+            "tools/qt6/bin",
+            "bin"
+          ]
         }
       ],
       "dllPatterns": [
+        "Qt6Core.dll",
+        "Qt6Gui.dll",
+        "Qt6Widgets.dll"
+      ],
+      "requiredDllPatterns": [
         "Qt6Core.dll",
         "Qt6Gui.dll",
         "Qt6Widgets.dll"
