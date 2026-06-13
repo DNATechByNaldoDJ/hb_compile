@@ -1,0 +1,8 @@
+.git
+.vscode
+logs
+out
+scratch
+tools
+config/external-deps.generated*.ps1
+config/external-deps.local.ps1

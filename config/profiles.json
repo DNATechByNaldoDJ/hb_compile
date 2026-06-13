@@ -30,6 +30,56 @@
         "HB_CPU": "x86_64"
       }
     },
+    "cygwin": {
+      "description": "Build POSIX Windows x64 usando Cygwin, make e gcc.",
+      "installSubdir": "cygwin",
+      "runner": "cygwin",
+      "dependencyMode": "system",
+      "loadExternalDeps": false,
+      "requires": [
+        "cygwin"
+      ],
+      "env": {
+        "HB_PLATFORM": "cygwin",
+        "HB_COMPILER": "gcc",
+        "HB_CPU": "x86_64",
+        "HB_USER_CFLAGS": "-march=x86-64 -mtune=generic"
+      }
+    },
+    "linux-wsl": {
+      "description": "Build Linux x64 dentro do WSL usando make e gcc.",
+      "installSubdir": "linux-wsl",
+      "runner": "wsl",
+      "dependencyMode": "system",
+      "loadExternalDeps": false,
+      "requires": [
+        "wsl"
+      ],
+      "env": {
+        "HB_PLATFORM": "linux",
+        "HB_COMPILER": "gcc",
+        "HB_CPU": "x86_64"
+      }
+    },
+    "linux-docker": {
+      "description": "Build Linux x64 reproduzivel em container Docker.",
+      "installSubdir": "linux-docker",
+      "runner": "docker",
+      "dependencyMode": "system",
+      "loadExternalDeps": false,
+      "dockerImage": "hb-compile/linux:base",
+      "dockerFullImage": "hb-compile/linux:full",
+      "dockerfile": "config\\docker\\linux\\Dockerfile",
+      "dockerFullDockerfile": "config\\docker\\linux\\Dockerfile.full",
+      "requires": [
+        "docker"
+      ],
+      "env": {
+        "HB_PLATFORM": "linux",
+        "HB_COMPILER": "gcc",
+        "HB_CPU": "x86_64"
+      }
+    },
     "zig": {
       "description": "Build nativo Windows usando Zig como frontend C.",
       "installSubdir": "zig",

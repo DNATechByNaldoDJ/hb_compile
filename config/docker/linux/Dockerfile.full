@@ -1,0 +1,41 @@
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    QT_SELECT=6
+
+ARG INSTALL_QT=1
+
+RUN set -eux; \
+    apt-get update; \
+    packages=" \
+      bash \
+      binutils \
+      build-essential \
+      ca-certificates \
+      file \
+      git \
+      make \
+      pkg-config \
+      default-libmysqlclient-dev \
+      firebird-dev \
+      ghostscript \
+      libbz2-dev \
+      libcairo2-dev \
+      libcurl4-openssl-dev \
+      libfreeimage-dev \
+      libgs-dev \
+      libmagic-dev \
+      libncurses-dev \
+      libpcre2-dev \
+      libpq-dev \
+      libssl-dev \
+      libsqlite3-dev \
+      libx11-dev \
+      zlib1g-dev"; \
+    if [ "$INSTALL_QT" = "1" ]; then \
+      packages="$packages qt6-base-dev qt6-base-dev-tools"; \
+    fi; \
+    apt-get install -y --no-install-recommends $packages; \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace

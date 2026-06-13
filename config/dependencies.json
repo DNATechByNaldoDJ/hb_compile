@@ -86,6 +86,9 @@
       "vcpkgPorts": [
         "libmysql"
       ],
+      "unsupportedTriplets": [
+        "*mingw*"
+      ],
       "dllPatterns": [
         "libmysql.dll",
         "libmariadb.dll"
@@ -110,6 +113,10 @@
       "displayName": "Qt 6",
       "envVar": "HB_WITH_QT",
       "triplet": "x64-windows-no-dwm",
+      "triplets": {
+        "x64-windows": "x64-windows-no-dwm",
+        "x64-mingw-*": "x64-mingw-dynamic"
+      },
       "installTimeoutMinutes": 360,
       "overlayTriplets": "triplets/custom",
       "headers": [
@@ -214,6 +221,9 @@
       "setTo": "includeRoot",
       "vcpkgPorts": [
         "libmagic"
+      ],
+      "unsupportedTriplets": [
+        "*mingw*"
       ]
     },
     "firebird": {

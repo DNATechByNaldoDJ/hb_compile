@@ -21,6 +21,7 @@ Harbour.
 
 - `config\profiles.json`: perfis de compilacao e origem padrao do Harbour.
 - `config\dependencies.json`: catalogo de dependencias opcionais usadas no modo `-Full`.
+- `config\docker\linux\`: Dockerfiles para builds Linux reprodutiveis.
 - `config\external-deps.example.ps1`: modelo para dependencias opcionais `HB_WITH_*`.
 - `DEPENDENCIES.md`: guia de dependencias, conjuntos e wrappers full.
 - `OPENADS.md`: detalhes do fallback OpenADS usado pelo contrib `rddads`.
@@ -118,6 +119,94 @@ O perfil `msvc64` tenta carregar automaticamente o ambiente do Visual Studio
 Build Tools via `vswhere`. Se preferir, abra antes um "Developer PowerShell"
 ou chame `vcvarsall.bat` e use `-NoVsDevShell`.
 
+O perfil `mingw64` exige um GCC MinGW-w64/MSYS2 no `PATH`. Se o primeiro
+`gcc.exe` encontrado for o do Cygwin, o build falha cedo com uma mensagem
+explicita; para esse toolchain use os wrappers `cygwin`.
+
+## Build Cygwin, WSL e Docker
+
+Para Cygwin, instale pelo setup do Cygwin ao menos `gcc-core`, `make`, `binutils`
+e `git` se quiser clonar o Harbour por esse ambiente. O wrapper chama o
+`bash.exe` do Cygwin e roda `make` dentro dele:
+
+```powershell
+.\build-cygwin.ps1 -Clean
+.\build-full-cygwin.ps1 -Clean
+```
+
+O perfil Cygwin x64 injeta `HB_USER_CFLAGS=-march=x86-64 -mtune=generic`,
+porque o `config/cygwin/gcc.mk` do Harbour ainda adiciona `-march=i586`, que o
+GCC x86_64 atual rejeita.
+
+Se o Cygwin estiver fora de `C:\cygwin64` ou `C:\cygwin`, informe o caminho:
+
+```powershell
+.\build-cygwin.ps1 -CygwinBash D:\cygwin64\bin\bash.exe -Clean
+```
+
+Para Linux via WSL, instale dentro da distro pacotes como `build-essential`,
+`make`, `gcc` e `git`. Em distros Debian/Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install build-essential git
+```
+
+Depois rode do Windows:
+
+```powershell
+.\build-linux-wsl.ps1 -Clean
+.\build-full-linux-wsl.ps1 -Clean
+```
+
+Para escolher uma distro WSL especifica:
+
+```powershell
+.\build-linux-wsl.ps1 -WslDistro Ubuntu-24.04 -Clean
+```
+
+Se sua distro exige autenticar com um usuario especifico, use `-WslUser`. O
+wrapper repassa isso como `wsl.exe --user <usuario>` e aguarda o WSL retornar:
+
+```powershell
+.\build-full-linux-wsl.ps1 -WslUser seu_usuario -Clean
+.\build-full-linux-wsl.ps1 -WslDistro Ubuntu-24.04 -WslUser seu_usuario -Clean
+```
+
+Os perfis `cygwin` e `linux-wsl` usam dependencias do proprio ambiente POSIX.
+O modo full nao chama o resolvedor `vcpkg` do Windows nesses perfis; ele deixa o
+Makefile do Harbour detectar bibliotecas instaladas no Cygwin/WSL e ativa
+`HB_INSTALL_3RDDYN=yes`.
+
+Para Linux reprodutivel, use Docker. O build normal usa
+`config\docker\linux\Dockerfile`; o full usa
+`config\docker\linux\Dockerfile.full`:
+
+```powershell
+.\build-linux-docker.ps1 -Clean
+.\build-full-linux-docker.ps1 -Clean
+```
+
+Por padrao, o script faz `docker build` da imagem antes de executar o build.
+Para reutilizar uma imagem ja criada:
+
+```powershell
+.\build-linux-docker.ps1 -SkipDockerBuild -Clean
+```
+
+Tambem e possivel trocar imagem ou Dockerfile:
+
+```powershell
+.\build-linux-docker.ps1 -DockerImage minha/imagem:dev -SkipDockerBuild -Clean
+.\build-full-linux-docker.ps1 -Dockerfile config\docker\linux\Dockerfile.full -Clean
+```
+
+Quando `-IgnoreDependency qt` e usado no Docker full, o script tambem passa
+`--build-arg INSTALL_QT=0` para evitar instalar os pacotes Qt na imagem.
+
+Na pratica, WSL e melhor para iterar no dia a dia; Docker e melhor para
+confirmar um build Linux limpo e reproduzivel.
+
 ## Build com Zig
 
 Se o Zig ja estiver no PATH, nada precisa ser baixado. Para instalar localmente
@@ -194,10 +283,12 @@ Depois de um build nativo instalado:
 
 ## Build full com dependencias opcionais
 
-O modo `-Full` usa `config\dependencies.json` para verificar dependencias
-opcionais e, quando possivel, instala-las via `vcpkg` em `tools\vcpkg`.
-Depois ele gera `config\external-deps.generated.ps1` com as variaveis
-`HB_WITH_*` que o Harbour espera.
+Nos perfis Windows, o modo `-Full` usa `config\dependencies.json` para verificar
+dependencias opcionais e, quando possivel, instala-las via `vcpkg` em
+`tools\vcpkg`. Depois ele gera `config\external-deps.generated.<perfil>.ps1`
+com as variaveis `HB_WITH_*` que o Harbour espera. Perfis POSIX, como `cygwin`
+`linux-wsl` e `linux-docker`, usam as dependencias instaladas dentro do proprio
+ambiente.
 
 Verificar sem instalar:
 
@@ -217,12 +308,25 @@ Instalar dependencias automatizaveis e compilar com Zig:
 .\build-full-zig.ps1 -Clean
 ```
 
+Para ignorar uma dependencia especifica no build full, use
+`-IgnoreDependency`. Isso tambem gera `HB_WITH_<DEP>=no`, entao o Harbour nao
+tenta autodetectar a biblioteca ignorada:
+
+```powershell
+.\build-full-msvc64.ps1 -IgnoreDependency qt -Clean
+.\build-full-linux-docker.ps1 -IgnoreDependency qt -Clean
+.\build-full-msvc64.ps1 -IgnoreDependency qt,allegro -Clean
+```
+
 Wrappers equivalentes existem para os outros perfis comuns:
 
 ```powershell
 .\build-full-msvc64.ps1 -Clean
 .\build-full-mingw64.ps1 -Clean
 .\build-full-standard.ps1 -Clean
+.\build-full-cygwin.ps1 -Clean
+.\build-full-linux-wsl.ps1 -Clean
+.\build-full-linux-docker.ps1 -Clean
 ```
 
 Somente preparar dependencias de rede:
@@ -256,6 +360,8 @@ Se quiser que qualquer pendencia aborte o build full:
 
 - As saidas instaladas ficam em `out\<perfil>`.
 - Os logs ficam em `logs\yyyyMMdd-HHmmss-<perfil>.log`.
+- Ambientes gerados pelo resolvedor full ficam em
+  `config\external-deps.generated.<perfil>.ps1` e sao ignorados pelo Git.
 - Os artefatos intermediarios continuam sendo criados pelo Makefile do
   Harbour dentro do `HarbourRoot`, em `bin` e `lib`, separados por
   `HB_COMPILER`/`HB_BUILD_NAME`.

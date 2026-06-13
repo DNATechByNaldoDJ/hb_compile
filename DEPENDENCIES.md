@@ -1,7 +1,10 @@
 # Dependencias opcionais
 
-O modo `-Full` prepara dependencias opcionais dos contribs do Harbour antes de
-chamar `win-make.exe`. A fonte da verdade fica em `config\dependencies.json`.
+O modo `-Full` prepara dependencias opcionais dos contribs do Harbour. Em
+perfis Windows ele chama `win-make.exe` e usa `vcpkg`; em perfis POSIX, como
+`cygwin`, `linux-wsl` e `linux-docker`, ele usa as bibliotecas ja instaladas no
+ambiente correspondente. A fonte da verdade para o resolvedor Windows fica em
+`config\dependencies.json`.
 
 ## Fluxo
 
@@ -9,9 +12,15 @@ chamar `win-make.exe`. A fonte da verdade fica em `config\dependencies.json`.
 2. O executor chama `scripts\Resolve-HarbourDeps.ps1`.
 3. O resolvedor procura headers ja configurados no ambiente.
 4. Quando possivel, instala portas via `vcpkg` em `tools\vcpkg`.
-5. O resolvedor grava `config\external-deps.generated.ps1`.
+5. O resolvedor grava `config\external-deps.generated.<perfil>.ps1`.
 6. O build carrega primeiro o arquivo gerado e depois
    `config\external-deps.local.ps1`, permitindo override local.
+
+Nos perfis `cygwin`, `linux-wsl` e `linux-docker`, o fluxo pula o resolvedor
+`vcpkg` do Windows e nao carrega `external-deps.local.ps1`, para evitar misturar
+paths Windows com paths POSIX. Instale as dependencias opcionais diretamente no
+Cygwin/WSL, ou ajuste `config\docker\linux\Dockerfile.full` no caso Docker,
+quando quiser que o Makefile do Harbour as detecte.
 
 ## Wrappers full
 
@@ -20,6 +29,9 @@ chamar `win-make.exe`. A fonte da verdade fica em `config\dependencies.json`.
 .\build-full-msvc64.ps1 -Clean
 .\build-full-mingw64.ps1 -Clean
 .\build-full-standard.ps1 -Clean
+.\build-full-cygwin.ps1 -Clean
+.\build-full-linux-wsl.ps1 -Clean
+.\build-full-linux-docker.ps1 -Clean
 ```
 
 Triplets padrao:
@@ -29,6 +41,9 @@ Triplets padrao:
 - `build-full-mingw64.ps1`: usa `x64-mingw-dynamic`.
 - `build-full-standard.ps1`: preserva a autodeteccao do Harbour e usa o
   triplet padrao do catalogo.
+- `build-full-cygwin.ps1`, `build-full-linux-wsl.ps1` e
+  `build-full-linux-docker.ps1`: nao usam triplet `vcpkg`; dependem dos
+  pacotes instalados no ambiente POSIX.
 
 Qualquer wrapper aceita override:
 
@@ -56,7 +71,13 @@ Exemplos:
 .\scripts\Resolve-HarbourDeps.ps1 -Set database -Install -GenerateEnv
 .\build-full-zig.ps1 -DependencySet network -Clean
 .\build-full-zig.ps1 -Dependency openssl,curl,ads -Clean
+.\build-full-msvc64.ps1 -IgnoreDependency qt -Clean
 ```
+
+`-IgnoreDependency` aceita uma ou mais dependencias e gera `HB_WITH_*=no` para
+elas, evitando tanto instalacao quanto autodeteccao pelo Makefile do Harbour.
+Use isso para dependencias demoradas ou indesejadas em uma rodada de validacao,
+por exemplo `-IgnoreDependency qt`.
 
 ## Dependencias automatizaveis
 
@@ -66,9 +87,16 @@ falhar ou demorar conforme a revisao atual do `vcpkg`; quando isso acontece, o
 resolvedor desativa a dependencia afetada e segue, exceto com
 `-StrictDependencies`.
 
-Qt usa um triplet customizado `x64-windows-no-dwm` para evitar DWM em builds do
-Harbour que nao esperam essa dependencia. Em builds MinGW, confira o resultado
-de `Resolve-HarbourDeps.ps1` e use override local se precisar habilitar Qt.
+Qt usa um triplet customizado `x64-windows-no-dwm` nos builds MSVC para evitar
+DWM em builds do Harbour que nao esperam essa dependencia. Em builds MinGW, o
+resolvedor usa `x64-mingw-dynamic` por padrao. Algumas portas do vcpkg, como
+`libmysql` e `libmagic`, sao marcadas como nao suportadas em MinGW e sao
+desativadas automaticamente quando nao houver override manual.
+
+O wrapper `build-full-mingw64.ps1` tambem valida o toolchain antes de resolver
+dependencias: `gcc -dumpmachine` precisa apontar para MinGW-w64/MSYS2. Se o
+`gcc.exe` encontrado for o do Cygwin, use `build-full-cygwin.ps1` ou coloque o
+MinGW no `PATH` antes do Cygwin.
 
 ## Dependencias manuais
 
@@ -94,8 +122,8 @@ $env:HB_WITH_MYSQL = 'F:\SDKs\mysql\include'
 $env:HB_USER_LIBPATHS = 'F:\SDKs\OpenADS\dist\import-libs\x64\msvc'
 ```
 
-Esse arquivo nao entra no Git. Ele e carregado depois de
-`external-deps.generated.ps1`, entao valores locais vencem os gerados.
+Esse arquivo nao entra no Git. Em perfis Windows, ele e carregado depois de
+`external-deps.generated.<perfil>.ps1`, entao valores locais vencem os gerados.
 
 ## Diagnostico rapido
 

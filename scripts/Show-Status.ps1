@@ -88,9 +88,15 @@ $makeExe = Join-Path $harbourRoot 'win-make.exe'
 $makeStatus = if (Test-Path -LiteralPath $makeExe) { Format-ProjectPath $makeExe } else { 'NAO ENCONTRADO' }
 $zig = Get-Command 'zig.exe' -ErrorAction SilentlyContinue
 $zigStatus = if ($zig) { "$($zig.Source) ($((& $zig.Source version).Trim()))" } else { 'NAO ENCONTRADO' }
+$docker = Get-Command 'docker.exe' -ErrorAction SilentlyContinue
+if (-not $docker) {
+   $docker = Get-Command 'docker' -ErrorAction SilentlyContinue
+}
+$dockerStatus = if ($docker) { $docker.Source } else { 'NAO ENCONTRADO' }
 
 Write-Host "win-make    : $makeStatus"
 Write-Host "zig         : $zigStatus"
+Write-Host "docker      : $dockerStatus"
 if (-not (Test-Path -LiteralPath $harbourRoot)) {
    Write-Host "Fonte       : ausente; sera clonado no primeiro build"
 }

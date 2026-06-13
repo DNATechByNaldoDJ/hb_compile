@@ -3,10 +3,14 @@ param(
    [ValidateSet('full', 'network', 'database', 'gui', 'graphics')]
    [string] $Set = 'full',
    [string[]] $Dependency = @(),
+   [Alias('Ignore', 'DependencyIgnore', 'SkipDependency')]
+   [string[]] $IgnoreDependency = @(),
    [ValidateSet('vcpkg')]
    [string] $Provider = 'vcpkg',
    [string] $Triplet = '',
    [string] $VcpkgRoot = '',
+   [string] $GeneratedEnvPath = '',
+   [string] $HarbourCompiler = '',
    [switch] $Install,
    [switch] $Check,
    [switch] $GenerateEnv,
@@ -47,7 +51,7 @@ function Resolve-PhysicalPath {
 $ProjectRoot = Resolve-PhysicalPath (Split-Path -Parent $PSScriptRoot)
 $CatalogPath = Join-Path $ProjectRoot 'config\dependencies.json'
 $ProfilesPath = Join-Path $ProjectRoot 'config\profiles.json'
-$GeneratedEnvPath = Join-Path $ProjectRoot 'config\external-deps.generated.ps1'
+$DefaultGeneratedEnvPath = Join-Path $ProjectRoot 'config\external-deps.generated.ps1'
 $LocalEnvPath = Join-Path $ProjectRoot 'config\external-deps.local.ps1'
 
 function Resolve-ProjectPath {
@@ -124,12 +128,74 @@ function Get-DependencyTriplet {
       [Parameter(Mandatory = $true)][string] $DefaultTriplet
    )
 
+   if ($null -ne $DependencyConfig.PSObject.Properties['triplets'] -and $null -ne $DependencyConfig.triplets) {
+      $exactTriplet = $DependencyConfig.triplets.PSObject.Properties[$DefaultTriplet]
+      if ($exactTriplet -and -not [string]::IsNullOrWhiteSpace([string] $exactTriplet.Value)) {
+         return [string] $exactTriplet.Value
+      }
+
+      foreach ($tripletMap in @($DependencyConfig.triplets.PSObject.Properties)) {
+         if ($DefaultTriplet -like $tripletMap.Name -and -not [string]::IsNullOrWhiteSpace([string] $tripletMap.Value)) {
+            return [string] $tripletMap.Value
+         }
+      }
+   }
+
    $configuredTriplet = [string] (Get-ConfigPropertyValue -Config $DependencyConfig -Name 'triplet' -Default '')
    if (-not [string]::IsNullOrWhiteSpace($configuredTriplet)) {
       return $configuredTriplet
    }
 
    return $DefaultTriplet
+}
+
+function Test-DependencyTripletSupported {
+   param(
+      [Parameter(Mandatory = $true)] $DependencyConfig,
+      [Parameter(Mandatory = $true)][string] $TripletName
+   )
+
+   $unsupportedTriplets = @()
+   if ($null -ne $DependencyConfig.PSObject.Properties['unsupportedTriplets'] -and $null -ne $DependencyConfig.unsupportedTriplets) {
+      $unsupportedTriplets = @($DependencyConfig.unsupportedTriplets) |
+         Where-Object { -not [string]::IsNullOrWhiteSpace([string] $_) }
+   }
+
+   foreach ($pattern in $unsupportedTriplets) {
+      if ($TripletName -like [string] $pattern) {
+         return [pscustomobject]@{
+            Supported = $false
+            Reason = "triplet '$TripletName' marcado como nao suportado"
+         }
+      }
+   }
+
+   $supportedTriplets = @()
+   if ($null -ne $DependencyConfig.PSObject.Properties['supportedTriplets'] -and $null -ne $DependencyConfig.supportedTriplets) {
+      $supportedTriplets = @($DependencyConfig.supportedTriplets) |
+         Where-Object { -not [string]::IsNullOrWhiteSpace([string] $_) }
+   }
+
+   if ($supportedTriplets.Count -gt 0) {
+      foreach ($pattern in $supportedTriplets) {
+         if ($TripletName -like [string] $pattern) {
+            return [pscustomobject]@{
+               Supported = $true
+               Reason = ''
+            }
+         }
+      }
+
+      return [pscustomobject]@{
+         Supported = $false
+         Reason = "triplet '$TripletName' fora da lista suportada"
+      }
+   }
+
+   return [pscustomobject]@{
+      Supported = $true
+      Reason = ''
+   }
 }
 
 function Get-DependencyInstallTimeoutMinutes {
@@ -227,6 +293,37 @@ function Get-DependencyNames {
    }
 
    return @($setValues)
+}
+
+function Expand-NameList {
+   param([string[]] $Values)
+
+   $names = New-Object System.Collections.Generic.List[string]
+   foreach ($value in @($Values)) {
+      foreach ($name in ([string] $value -split ',')) {
+         $trimmed = $name.Trim()
+         if (-not [string]::IsNullOrWhiteSpace($trimmed) -and -not $names.Contains($trimmed)) {
+            $names.Add($trimmed)
+         }
+      }
+   }
+
+   return @($names)
+}
+
+function Resolve-DependencyName {
+   param(
+      [Parameter(Mandatory = $true)] $Catalog,
+      [Parameter(Mandatory = $true)][string] $Name
+   )
+
+   foreach ($candidate in @($Catalog.dependencies.PSObject.Properties.Name)) {
+      if ($candidate.Equals($Name, [System.StringComparison]::OrdinalIgnoreCase)) {
+         return $candidate
+      }
+   }
+
+   throw "Dependencia desconhecida no catalogo: $Name"
 }
 
 function Test-HeaderInRoot {
@@ -1072,6 +1169,83 @@ function Find-ToolEnv {
    return ''
 }
 
+function Add-UniqueWords {
+   param(
+      $Words,
+      [string] $Value
+   )
+
+   foreach ($word in @($Value -split '\s+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+      if (-not $Words.Contains($word)) {
+         $Words.Add($word)
+      }
+   }
+}
+
+function Get-VcpkgLibPathFlag {
+   param(
+      [Parameter(Mandatory = $true)][string] $Path,
+      [Parameter(Mandatory = $true)][string] $TripletName,
+      [string] $Compiler = ''
+   )
+
+   $normalizedCompiler = $Compiler.ToLowerInvariant()
+   if ($normalizedCompiler -like 'msvc*' -or ($TripletName -like '*windows*' -and $TripletName -notlike '*mingw*')) {
+      return "-libpath:$Path"
+   }
+
+   return "-L$($Path.Replace('\', '/'))"
+}
+
+function Add-VcpkgLinkerFlags {
+   param(
+      [Parameter(Mandatory = $true)][hashtable] $Values,
+      [Parameter(Mandatory = $true)][object[]] $Results,
+      [Parameter(Mandatory = $true)][string] $VcpkgRoot,
+      [string] $Compiler = ''
+   )
+
+   $ldFlags = New-Object System.Collections.Generic.List[string]
+   $dyFlags = New-Object System.Collections.Generic.List[string]
+   Add-UniqueWords -Words $ldFlags -Value ([System.Environment]::GetEnvironmentVariable('HB_USER_LDFLAGS', 'Process'))
+   Add-UniqueWords -Words $dyFlags -Value ([System.Environment]::GetEnvironmentVariable('HB_USER_DFLAGS', 'Process'))
+   $existingGeneratedFlags = ''
+   if ($Values.ContainsKey('HB_USER_LDFLAGS')) {
+      $existingGeneratedFlags = [string] $Values['HB_USER_LDFLAGS']
+   }
+   Add-UniqueWords -Words $ldFlags -Value $existingGeneratedFlags
+
+   $existingGeneratedDyFlags = ''
+   if ($Values.ContainsKey('HB_USER_DFLAGS')) {
+      $existingGeneratedDyFlags = [string] $Values['HB_USER_DFLAGS']
+   }
+   Add-UniqueWords -Words $dyFlags -Value $existingGeneratedDyFlags
+
+   foreach ($tripletName in @($Results | Where-Object { $_.Status -eq 'ok' -and $_.Provider -eq 'vcpkg' } | ForEach-Object { $_.Triplet } | Select-Object -Unique)) {
+      if ([string]::IsNullOrWhiteSpace([string] $tripletName)) {
+         continue
+      }
+
+      $libRoot = Join-Path (Get-VcpkgInstalledRoot -VcpkgRoot $VcpkgRoot -TripletName ([string] $tripletName)) 'lib'
+      if (Test-Path -LiteralPath $libRoot) {
+         $flag = Get-VcpkgLibPathFlag -Path $libRoot -TripletName ([string] $tripletName) -Compiler $Compiler
+         if (-not $ldFlags.Contains($flag)) {
+            $ldFlags.Add($flag)
+         }
+         if (-not $dyFlags.Contains($flag)) {
+            $dyFlags.Add($flag)
+         }
+      }
+   }
+
+   if ($ldFlags.Count -gt 0) {
+      $Values['HB_USER_LDFLAGS'] = ($ldFlags -join ' ')
+   }
+   if ($dyFlags.Count -gt 0) {
+      $Values['HB_USER_DFLAGS'] = ($dyFlags -join ' ')
+   }
+}
+
 function Write-GeneratedEnv {
    param(
       [Parameter(Mandatory = $true)][string] $Path,
@@ -1116,8 +1290,9 @@ function Write-DependencyReport {
    $installed = @($Results | Where-Object { $_.InstallState -in @('build', 'source') })
    $stampSkipped = @($Results | Where-Object { ([string] $_.InstallState) -like '*stamp*' })
    $cacheSkipped = @($Results | Where-Object { ([string] $_.InstallState) -like '*cache*' })
+   $ignored = @($Results | Where-Object { $_.Status -eq 'ignored' })
    $failed = @($Results | Where-Object { -not [string]::IsNullOrWhiteSpace([string] $_.Failure) })
-   $unavailable = @($Results | Where-Object { $_.Status -ne 'ok' })
+   $unavailable = @($Results | Where-Object { $_.Status -ne 'ok' -and $_.Status -ne 'ignored' })
    $qt = @($Results | Where-Object { $_.Name -eq 'qt' } | Select-Object -First 1)
 
    Write-Host ''
@@ -1126,6 +1301,7 @@ function Write-DependencyReport {
    Write-Host "  Instaladas: $(Join-DependencyResultNames -Items $installed)"
    Write-Host "  Puladas por stamp: $(Join-DependencyResultNames -Items $stampSkipped)"
    Write-Host "  Puladas por cache: $(Join-DependencyResultNames -Items $cacheSkipped)"
+   Write-Host "  Ignoradas: $(Join-DependencyResultNames -Items $ignored)"
    Write-Host "  Falhadas: $(Join-DependencyResultNames -Items $failed)"
    Write-Host "  Indisponiveis/desativadas: $(Join-DependencyResultNames -Items $unavailable)"
 
@@ -1139,7 +1315,10 @@ function Write-DependencyReport {
          default { [string] $qt[0].InstallState }
       }
 
-      if ([string]::IsNullOrWhiteSpace($qtSource)) {
+      if ($qt[0].Status -eq 'ignored') {
+         $qtSource = 'ignorado'
+      }
+      elseif ([string]::IsNullOrWhiteSpace($qtSource)) {
          $qtSource = [string] $qt[0].Status
       }
 
@@ -1169,6 +1348,13 @@ if ($DependencyInstallTimeoutMinutes -lt 0) {
    throw 'DependencyInstallTimeoutMinutes deve ser zero ou maior. Use 0 para desabilitar o timeout.'
 }
 
+if ([string]::IsNullOrWhiteSpace($GeneratedEnvPath)) {
+   $GeneratedEnvPath = $DefaultGeneratedEnvPath
+}
+else {
+   $GeneratedEnvPath = Resolve-ProjectPath $GeneratedEnvPath
+}
+
 if ([string]::IsNullOrWhiteSpace($Triplet)) {
    $Triplet = if ($Catalog.defaultTriplet) { [string] $Catalog.defaultTriplet } else { 'x64-windows' }
 }
@@ -1180,9 +1366,41 @@ else {
    $VcpkgRoot = Resolve-ProjectPath $VcpkgRoot
 }
 
-$dependencyNames = Get-DependencyNames -Catalog $Catalog -SetName $Set -Requested $Dependency
+$requestedDependencies = Expand-NameList -Values $Dependency
+$ignoredDependencies = @(Expand-NameList -Values $IgnoreDependency | ForEach-Object { Resolve-DependencyName -Catalog $Catalog -Name $_ })
+$dependencyNames = Get-DependencyNames -Catalog $Catalog -SetName $Set -Requested $requestedDependencies
+$dependencyNames = @($dependencyNames | ForEach-Object { Resolve-DependencyName -Catalog $Catalog -Name $_ })
+$dependencyNames = @($dependencyNames | Where-Object { $ignoredDependencies -notcontains $_ })
 $envValues = @{}
 $results = New-Object System.Collections.Generic.List[object]
+
+foreach ($ignoredName in $ignoredDependencies) {
+   $dep = $Catalog.dependencies.$ignoredName
+   $depTriplet = Get-DependencyTriplet -DependencyConfig $dep -DefaultTriplet $Triplet
+   if ($dep.envVar) {
+      $envValues[[string] $dep.envVar] = 'no'
+      if ($GenerateEnv) {
+         Write-Warning "Gerando $($dep.envVar)=no para ignorar '$ignoredName' no build."
+      }
+   }
+
+   $depPorts = @(Get-DependencyVcpkgPorts -DependencyConfig $dep)
+   $results.Add([pscustomobject]@{
+      Name = $ignoredName
+      Status = 'ignored'
+      EnvVar = $dep.envVar
+      EnvValue = if ($dep.envVar) { 'no' } else { '' }
+      Header = ''
+      Provider = 'ignore'
+      Triplet = $depTriplet
+      Ports = if ($depPorts.Count -gt 0) { ($depPorts -join ', ') } else { '' }
+      InstallState = 'ignored'
+      TimeoutMinutes = 0
+      Duration = '00:00'
+      Failure = ''
+      Note = 'ignorada via -IgnoreDependency'
+   })
+}
 
 $needsVcpkg = $false
 if ($Install) {
@@ -1244,6 +1462,12 @@ foreach ($name in $dependencyNames) {
    $providerName = if ($autoInstall) { $Provider } else { 'manual' }
    $sourceFallback = Get-DependencySourceFallback -DependencyConfig $dep
    $foundInVcpkg = $found.Found -and (Test-PathUnderRoot -Path $found.Header -Root $depInstalledRoot)
+   $tripletSupport = Test-DependencyTripletSupported -DependencyConfig $dep -TripletName $depTriplet
+   if (-not $tripletSupport.Supported -and -not $found.Found) {
+      $autoInstall = $false
+      $providerName = 'manual'
+      $disableReason = "$($tripletSupport.Reason); dependencia desativada no build"
+   }
 
    if ($foundInVcpkg) {
       $artifactState = Test-DependencyInstalledArtifacts -DependencyConfig $dep -InstalledRoot $depInstalledRoot
@@ -1389,16 +1613,17 @@ foreach ($name in $dependencyNames) {
    }
 }
 
+$resultRows = @($results | ForEach-Object { $_ })
 if ($GenerateEnv) {
+   Add-VcpkgLinkerFlags -Values $envValues -Results $resultRows -VcpkgRoot $VcpkgRoot -Compiler $HarbourCompiler
    Write-GeneratedEnv -Path $GeneratedEnvPath -Values $envValues
 }
 
-$resultRows = @($results | ForEach-Object { $_ })
 $resultRows | Select-Object Name, Status, Provider, Triplet, Ports, InstallState, Duration, EnvVar, EnvValue, Note |
    Format-Table -AutoSize
 Write-DependencyReport -Results $resultRows
 
-$missing = @($results | Where-Object { $_.Status -ne 'ok' })
+$missing = @($results | Where-Object { $_.Status -ne 'ok' -and $_.Status -ne 'ignored' })
 if ($Strict -and $missing.Count -gt 0) {
    throw "Dependencias pendentes: $($missing.Name -join ', ')"
 }
