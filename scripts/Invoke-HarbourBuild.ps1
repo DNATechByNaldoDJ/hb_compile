@@ -15,6 +15,7 @@ param(
    [hashtable] $Env = @{},
    [switch] $Full,
    [switch] $SkipDependencyInstall,
+   [switch] $InstallSystemDependencies,
    [ValidateSet('full', 'network', 'database', 'gui', 'graphics')]
    [string] $DependencySet = 'full',
    [string[]] $Dependency = @(),
@@ -29,7 +30,9 @@ param(
    [switch] $ListProfiles,
    [switch] $NoVsDevShell,
    [string] $VsArch = 'amd64',
+   [string] $CygwinSetup = '',
    [string] $CygwinBash = '',
+   [string] $MsysBash = '',
    [string] $WslDistro = '',
    [string] $WslUser = '',
    [string] $DockerImage = '',
@@ -147,6 +150,61 @@ function Assert-Command {
 
    if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
       throw "$Name nao foi encontrado. $Hint"
+   }
+}
+
+function Invoke-BashProbe {
+   param(
+      [Parameter(Mandatory = $true)][string] $Path,
+      [Parameter(Mandatory = $true)][string] $Script,
+      [int] $TimeoutSeconds = 5
+   )
+
+   $process = $null
+   try {
+      $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+      $startInfo.FileName = $Path
+      $startInfo.Arguments = "-lc $(Format-CommandArgument $Script)"
+      $startInfo.UseShellExecute = $false
+      $startInfo.CreateNoWindow = $true
+      $startInfo.RedirectStandardOutput = $true
+      $startInfo.RedirectStandardError = $true
+
+      $process = New-Object System.Diagnostics.Process
+      $process.StartInfo = $startInfo
+      [void] $process.Start()
+
+      if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+         try {
+            $process.Kill()
+         }
+         catch {
+         }
+
+         return [pscustomobject]@{
+            ExitCode = -1
+            StdOut = ''
+            StdErr = 'timeout'
+         }
+      }
+
+      return [pscustomobject]@{
+         ExitCode = $process.ExitCode
+         StdOut = $process.StandardOutput.ReadToEnd()
+         StdErr = $process.StandardError.ReadToEnd()
+      }
+   }
+   catch {
+      return [pscustomobject]@{
+         ExitCode = -1
+         StdOut = ''
+         StdErr = $_.Exception.Message
+      }
+   }
+   finally {
+      if ($process) {
+         $process.Dispose()
+      }
    }
 }
 
@@ -273,6 +331,272 @@ function Resolve-DependencyName {
    throw "Dependencia desconhecida no catalogo: $Name"
 }
 
+function Get-DependencyCatalog {
+   $dependencyCatalogPath = Join-Path $ProjectRoot 'config\dependencies.json'
+   if (-not (Test-Path -LiteralPath $dependencyCatalogPath)) {
+      throw "Catalogo de dependencias nao encontrado: $dependencyCatalogPath"
+   }
+
+   return Get-Content -LiteralPath $dependencyCatalogPath -Raw | ConvertFrom-Json
+}
+
+function Add-UniqueString {
+   param(
+      [Parameter(Mandatory = $true)] $List,
+      [string[]] $Values
+   )
+
+   foreach ($value in @($Values)) {
+      $trimmed = ([string] $value).Trim()
+      if (-not [string]::IsNullOrWhiteSpace($trimmed) -and -not $List.Contains($trimmed)) {
+         $List.Add($trimmed)
+      }
+   }
+}
+
+function Get-RequestedDependencyNames {
+   param(
+      [Parameter(Mandatory = $true)] $Catalog,
+      [Parameter(Mandatory = $true)][string] $Set,
+      [string[]] $Dependencies = @(),
+      [string[]] $IgnoredDependencies = @()
+   )
+
+   $requested = New-Object System.Collections.Generic.List[string]
+   $expandedDependencies = Expand-NameList -Values $Dependencies
+   if ($expandedDependencies.Count -gt 0) {
+      foreach ($dependency in $expandedDependencies) {
+         Add-UniqueString -List $requested -Values @(Resolve-DependencyName -Catalog $Catalog -Name $dependency)
+      }
+   }
+   else {
+      $setProperty = $Catalog.sets.PSObject.Properties[$Set]
+      if (-not $setProperty) {
+         throw "Conjunto de dependencias desconhecido: $Set"
+      }
+
+      foreach ($dependency in @($setProperty.Value)) {
+         Add-UniqueString -List $requested -Values @(Resolve-DependencyName -Catalog $Catalog -Name ([string] $dependency))
+      }
+   }
+
+   $ignored = Expand-NameList -Values $IgnoredDependencies
+   foreach ($ignoredDependency in $ignored) {
+      $resolvedIgnored = Resolve-DependencyName -Catalog $Catalog -Name $ignoredDependency
+      for ($index = $requested.Count - 1; $index -ge 0; $index--) {
+         if ($requested[$index].Equals($resolvedIgnored, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $requested.RemoveAt($index)
+         }
+      }
+   }
+
+   return @($requested.ToArray())
+}
+
+function Get-SystemDependencyPlan {
+   param(
+      [Parameter(Mandatory = $true)][string] $Runner,
+      [Parameter(Mandatory = $true)][string[]] $Dependencies
+   )
+
+   $packages = New-Object System.Collections.Generic.List[string]
+   $manual = New-Object System.Collections.Generic.List[string]
+
+   switch ($Runner) {
+      'cygwin' {
+         Add-UniqueString -List $packages -Values @(
+            'gcc-core', 'make', 'binutils', 'git', 'pkg-config',
+            'zlib-devel', 'libpcre-devel', 'libncurses-devel',
+            'libslang-devel', 'libX11-devel', 'libsqlite3-devel',
+            'libbz2-devel', 'libexpat-devel', 'unixODBC-devel',
+            'libcups-devel'
+         )
+
+         $map = @{
+            openssl = @('openssl-devel')
+            curl = @('libcurl-devel')
+            mysql = @('libmariadb-devel')
+            pgsql = @('libpq-devel')
+            cairo = @('libcairo-devel')
+            freeimage = @('libfreeimage-devel')
+            gd = @('libgd-devel')
+            libmagic = @('libmagic-devel')
+            ghostscript = @('ghostscript', 'libgs-devel')
+         }
+      }
+      'msys' {
+         Add-UniqueString -List $packages -Values @(
+            'base-devel', 'make', 'binutils', 'gcc', 'git', 'pkgconf',
+            'zlib-devel', 'pcre-devel', 'ncurses-devel', 'libsqlite-devel'
+         )
+
+         $map = @{
+            openssl = @('openssl-devel')
+            curl = @('libcurl-devel')
+         }
+      }
+      'wsl' {
+         Add-UniqueString -List $packages -Values @(
+            'build-essential', 'git', 'make', 'binutils', 'pkg-config',
+            'ca-certificates', 'file', 'zlib1g-dev', 'libpcre3-dev',
+            'libncurses-dev', 'libslang2-dev', 'libx11-dev',
+            'libsqlite3-dev', 'libbz2-dev', 'libexpat1-dev',
+            'libcups2-dev', 'unixodbc-dev'
+         )
+
+         $map = @{
+            openssl = @('libssl-dev')
+            curl = @('libcurl4-openssl-dev')
+            mysql = @('default-libmysqlclient-dev')
+            pgsql = @('libpq-dev')
+            qt = @('qt6-base-dev', 'qt6-base-dev-tools')
+            cairo = @('libcairo2-dev')
+            freeimage = @('libfreeimage-dev')
+            gd = @('libgd-dev')
+            libmagic = @('libmagic-dev')
+            firebird = @('firebird-dev')
+            ghostscript = @('ghostscript', 'libgs-dev')
+            allegro = @('liballegro4-dev')
+         }
+      }
+      'docker' {
+         return [pscustomobject]@{
+            Packages = @()
+            Manual = @()
+            Message = 'Docker instala dependencias do full durante o docker build usando config\docker\linux\Dockerfile.full.'
+         }
+      }
+      default {
+         return [pscustomobject]@{
+            Packages = @()
+            Manual = @()
+            Message = "Runner '$Runner' nao tem instalador de dependencias do sistema."
+         }
+      }
+   }
+
+   foreach ($dependency in @($Dependencies)) {
+      if ($map.ContainsKey($dependency)) {
+         Add-UniqueString -List $packages -Values @($map[$dependency])
+      }
+      else {
+         Add-UniqueString -List $manual -Values @($dependency)
+      }
+   }
+
+   return [pscustomobject]@{
+      Packages = @($packages.ToArray())
+      Manual = @($manual.ToArray())
+      Message = ''
+   }
+}
+
+function Resolve-CygwinSetup {
+   param(
+      [string] $PreferredPath = '',
+      [string] $BashPath = ''
+   )
+
+   $candidates = New-Object System.Collections.Generic.List[string]
+   if (-not [string]::IsNullOrWhiteSpace($PreferredPath)) {
+      $candidates.Add($PreferredPath)
+   }
+
+   if (-not [string]::IsNullOrWhiteSpace($BashPath)) {
+      $cygwinBin = Split-Path -Parent ([System.IO.Path]::GetFullPath($BashPath))
+      $cygwinRoot = Split-Path -Parent $cygwinBin
+      $candidates.Add((Join-Path $cygwinRoot 'setup-x86_64.exe'))
+      $candidates.Add((Join-Path $cygwinRoot 'setup-x86.exe'))
+   }
+
+   foreach ($path in @(
+      (Join-Path $ProjectRoot 'tools\setup-x86_64.exe'),
+      'C:\cygwin64\setup-x86_64.exe',
+      'C:\cygwin\setup-x86.exe',
+      (Join-Path $env:USERPROFILE 'Downloads\setup-x86_64.exe')
+   )) {
+      $candidates.Add($path)
+   }
+
+   foreach ($candidate in ($candidates | Select-Object -Unique)) {
+      if (Test-Path -LiteralPath $candidate) {
+         return [System.IO.Path]::GetFullPath($candidate)
+      }
+   }
+
+   throw 'setup-x86_64.exe do Cygwin nao foi encontrado. Baixe em https://cygwin.com/install.html ou informe -CygwinSetup C:\caminho\setup-x86_64.exe.'
+}
+
+function Invoke-SystemDependencyInstall {
+   param(
+      [Parameter(Mandatory = $true)][string] $Runner,
+      [Parameter(Mandatory = $true)] $RunnerState,
+      [string[]] $Packages = @(),
+      [string[]] $Manual = @(),
+      [string] $CygwinSetupPath = '',
+      [string[]] $WslArguments = @(),
+      [switch] $DryRun
+   )
+
+   if ($Packages.Count -eq 0) {
+      return
+   }
+
+   if ($Manual.Count -gt 0) {
+      Write-Warning "Dependencias sem pacote automatico para '$Runner': $($Manual -join ', '). Configure manualmente ou ignore com -IgnoreDependency."
+   }
+
+   switch ($Runner) {
+      'cygwin' {
+         $setup = Resolve-CygwinSetup -PreferredPath $CygwinSetupPath -BashPath $RunnerState.CygwinBash
+         $cygwinRoot = Split-Path -Parent (Split-Path -Parent ([System.IO.Path]::GetFullPath($RunnerState.CygwinBash)))
+         $arguments = @('--quiet-mode', '--root', $cygwinRoot, '--packages', ($Packages -join ','))
+         if ($DryRun) {
+            Write-Host "DryRun: $setup $($arguments -join ' ')"
+            return
+         }
+
+         Write-Host "Instalando dependencias Cygwin: $($Packages -join ', ')"
+         & $setup @arguments
+         if ($LASTEXITCODE -ne 0) {
+            throw "Instalacao de dependencias Cygwin falhou com codigo $LASTEXITCODE."
+         }
+      }
+      'msys' {
+         $script = "pacman -S --needed --noconfirm $(($Packages | ForEach-Object { Quote-ShArgument ([string] $_) }) -join ' ')"
+         if ($DryRun) {
+            Write-Host "DryRun: $($RunnerState.MsysBash) -lc $(Quote-ShArgument $script)"
+            return
+         }
+
+         Write-Host "Instalando dependencias MSYS2: $($Packages -join ', ')"
+         & $RunnerState.MsysBash -lc $script
+         if ($LASTEXITCODE -ne 0) {
+            throw "Instalacao de dependencias MSYS2 falhou com codigo $LASTEXITCODE. Rode 'pacman -Syu' no shell MSYS e tente novamente."
+         }
+      }
+      'wsl' {
+         $packageList = ($Packages | ForEach-Object { Quote-ShArgument ([string] $_) }) -join ' '
+         $script = "if [ `$(id -u) -eq 0 ]; then SUDO=; else SUDO=sudo; fi; `$SUDO apt-get update && `$SUDO apt-get install -y --no-install-recommends $packageList"
+         $arguments = @($WslArguments) + @('bash', '-lc', $script)
+         if ($DryRun) {
+            $prefix = if ($WslArguments.Count -gt 0) { "wsl.exe $($WslArguments -join ' ')" } else { 'wsl.exe' }
+            Write-Host "DryRun: $prefix bash -lc $(Quote-ShArgument $script)"
+            return
+         }
+
+         Write-Host "Instalando dependencias WSL: $($Packages -join ', ')"
+         & wsl.exe @arguments
+         if ($LASTEXITCODE -ne 0) {
+            throw "Instalacao de dependencias WSL falhou com codigo $LASTEXITCODE."
+         }
+      }
+      default {
+         Write-Host "Instalacao automatica de dependencias nao se aplica ao runner '$Runner'."
+      }
+   }
+}
+
 function Test-CygwinBash {
    param([Parameter(Mandatory = $true)][string] $Path)
 
@@ -281,8 +605,8 @@ function Test-CygwinBash {
    }
 
    try {
-      $uname = & $Path -lc 'uname -s' 2>$null
-      return ($LASTEXITCODE -eq 0 -and (($uname -join "`n") -match 'CYGWIN'))
+      $probe = Invoke-BashProbe -Path $Path -Script 'uname -s'
+      return ($probe.ExitCode -eq 0 -and $probe.StdOut -match 'CYGWIN')
    }
    catch {
       return $false
@@ -302,7 +626,7 @@ function Resolve-CygwinBash {
    }
 
    $pathBash = Get-Command 'bash.exe' -ErrorAction SilentlyContinue
-   if ($pathBash) {
+   if ($pathBash -and ([string] $pathBash.Source) -notmatch '\\Windows\\System32\\bash\.exe$') {
       $candidates.Add($pathBash.Source)
    }
 
@@ -315,6 +639,52 @@ function Resolve-CygwinBash {
    throw 'bash.exe do Cygwin nao foi encontrado. Instale Cygwin ou informe -CygwinBash C:\cygwin64\bin\bash.exe.'
 }
 
+function Test-MsysBash {
+   param([Parameter(Mandatory = $true)][string] $Path)
+
+   if (-not (Test-Path -LiteralPath $Path)) {
+      return $false
+   }
+
+   try {
+      $probe = Invoke-BashProbe -Path $Path -Script 'uname -s'
+      return ($probe.ExitCode -eq 0 -and $probe.StdOut -match 'MSYS|MINGW')
+   }
+   catch {
+      return $false
+   }
+}
+
+function Resolve-MsysBash {
+   param([string] $PreferredPath)
+
+   $candidates = New-Object System.Collections.Generic.List[string]
+   if (-not [string]::IsNullOrWhiteSpace($PreferredPath)) {
+      $candidates.Add($PreferredPath)
+   }
+
+   foreach ($path in @(
+      'C:\msys64\usr\bin\bash.exe',
+      'C:\msys32\usr\bin\bash.exe',
+      'C:\tools\msys64\usr\bin\bash.exe'
+   )) {
+      $candidates.Add($path)
+   }
+
+   $pathBash = Get-Command 'bash.exe' -ErrorAction SilentlyContinue
+   if ($pathBash -and ([string] $pathBash.Source) -notmatch '\\Windows\\System32\\bash\.exe$') {
+      $candidates.Add($pathBash.Source)
+   }
+
+   foreach ($candidate in ($candidates | Select-Object -Unique)) {
+      if (Test-MsysBash -Path $candidate) {
+         return [System.IO.Path]::GetFullPath($candidate)
+      }
+   }
+
+   throw 'bash.exe do MSYS2 nao foi encontrado. Instale MSYS2 ou informe -MsysBash C:\msys64\usr\bin\bash.exe.'
+}
+
 function Assert-CygwinTool {
    param(
       [Parameter(Mandatory = $true)][string] $BashPath,
@@ -324,6 +694,18 @@ function Assert-CygwinTool {
    & $BashPath -lc "command -v $(Quote-ShArgument $Name) >/dev/null"
    if ($LASTEXITCODE -ne 0) {
       throw "Ferramenta '$Name' nao foi encontrada dentro do Cygwin. Instale o pacote correspondente pelo setup do Cygwin."
+   }
+}
+
+function Assert-MsysTool {
+   param(
+      [Parameter(Mandatory = $true)][string] $BashPath,
+      [Parameter(Mandatory = $true)][string] $Name
+   )
+
+   & $BashPath -lc "command -v $(Quote-ShArgument $Name) >/dev/null"
+   if ($LASTEXITCODE -ne 0) {
+      throw "Ferramenta '$Name' nao foi encontrada dentro do MSYS2. Instale o pacote correspondente com pacman."
    }
 }
 
@@ -394,6 +776,7 @@ function Initialize-Runner {
    param(
       [Parameter(Mandatory = $true)][string] $Runner,
       [string] $CygwinBashPath = '',
+      [string] $MsysBashPath = '',
       [string] $Distro = '',
       [string] $WslUserName = '',
       [string] $DockerImageName = '',
@@ -421,6 +804,21 @@ function Initialize-Runner {
          return [pscustomobject]@{
             Name = 'cygwin'
             CygwinBash = $bash
+            MsysBash = ''
+            WslArguments = @()
+         }
+      }
+      'msys' {
+         $bash = Resolve-MsysBash -PreferredPath $MsysBashPath
+         if (-not $DryRun) {
+            Assert-MsysTool -BashPath $bash -Name 'make'
+            Assert-MsysTool -BashPath $bash -Name 'gcc'
+         }
+
+         return [pscustomobject]@{
+            Name = 'msys'
+            CygwinBash = ''
+            MsysBash = $bash
             WslArguments = @()
          }
       }
@@ -496,6 +894,32 @@ function ConvertTo-CygwinPath {
    return [string] ($converted | Select-Object -Last 1)
 }
 
+function ConvertTo-MsysPath {
+   param(
+      [Parameter(Mandatory = $true)][string] $Path,
+      [Parameter(Mandatory = $true)][string] $BashPath
+   )
+
+   $converted = & $BashPath -lc "cygpath -au $(Quote-ShArgument $Path)" 2>$null
+   if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace([string] $converted)) {
+      return [string] ($converted | Select-Object -Last 1)
+   }
+
+   $fullPath = [System.IO.Path]::GetFullPath($Path)
+   $root = [System.IO.Path]::GetPathRoot($fullPath)
+   if ($root -match '^([A-Za-z]):\\$') {
+      $drive = $matches[1].ToLowerInvariant()
+      $relative = $fullPath.Substring($root.Length).Replace('\', '/')
+      if ([string]::IsNullOrWhiteSpace($relative)) {
+         return "/$drive"
+      }
+
+      return "/$drive/$relative"
+   }
+
+   throw "Falha ao converter path para MSYS2: $Path"
+}
+
 function ConvertTo-WslPath {
    param(
       [Parameter(Mandatory = $true)][string] $Path,
@@ -553,6 +977,7 @@ function Convert-PathForRunner {
 
    switch ($RunnerState.Name) {
       'cygwin' { return ConvertTo-CygwinPath -Path $Path -BashPath $RunnerState.CygwinBash }
+      'msys' { return ConvertTo-MsysPath -Path $Path -BashPath $RunnerState.MsysBash }
       'wsl' { return ConvertTo-WslPath -Path $Path -WslArguments $RunnerState.WslArguments }
       'docker' { return ConvertTo-DockerPath -Path $Path -RunnerState $RunnerState }
       default { return $Path }
@@ -849,6 +1274,7 @@ if ($Runner -eq 'docker') {
 $runnerState = Initialize-Runner `
    -Runner $Runner `
    -CygwinBashPath $CygwinBash `
+   -MsysBashPath $MsysBash `
    -Distro $WslDistro `
    -WslUserName $WslUser `
    -DockerImageName $dockerImageName `
@@ -865,6 +1291,11 @@ foreach ($requirement in (@($ProfileConfig.requires) | Where-Object { -not [stri
       'cygwin' {
          if ($runnerState.Name -ne 'cygwin') {
             throw "Perfil '$Profile' requer Cygwin, mas usa runner '$($runnerState.Name)'."
+         }
+      }
+      'msys' {
+         if ($runnerState.Name -ne 'msys') {
+            throw "Perfil '$Profile' requer MSYS2, mas usa runner '$($runnerState.Name)'."
          }
       }
       'wsl' {
@@ -935,6 +1366,32 @@ if ($Full) {
    }
    elseif ($DependencyMode -eq 'system') {
       Write-Host "Perfil '$Profile' usa dependencias do sistema; o resolvedor vcpkg do Windows sera ignorado."
+      if ($SkipDependencyInstall) {
+         Write-Host "Instalacao de dependencias do sistema ignorada por -SkipDependencyInstall."
+      }
+      elseif ($InstallSystemDependencies) {
+         $dependencyCatalog = Get-DependencyCatalog
+         $requestedSystemDependencies = Get-RequestedDependencyNames `
+            -Catalog $dependencyCatalog `
+            -Set $DependencySet `
+            -Dependencies $Dependency `
+            -IgnoredDependencies $IgnoreDependency
+         $systemDependencyPlan = Get-SystemDependencyPlan -Runner $runnerState.Name -Dependencies $requestedSystemDependencies
+         if (-not [string]::IsNullOrWhiteSpace($systemDependencyPlan.Message)) {
+            Write-Host $systemDependencyPlan.Message
+         }
+         Invoke-SystemDependencyInstall `
+            -Runner $runnerState.Name `
+            -RunnerState $runnerState `
+            -Packages @($systemDependencyPlan.Packages) `
+            -Manual @($systemDependencyPlan.Manual) `
+            -CygwinSetupPath $CygwinSetup `
+            -WslArguments @($runnerState.WslArguments) `
+            -DryRun:$DryRun
+      }
+      else {
+         Write-Host "Use -InstallSystemDependencies para instalar os pacotes conhecidos do ambiente antes do build."
+      }
    }
    else {
       throw "Modo de dependencia desconhecido no perfil '$Profile': $DependencyMode"
@@ -970,6 +1427,7 @@ foreach ($item in @($ProfileConfig.env.PSObject.Properties)) {
 }
 
 $ignoredDependencyNames = Expand-NameList -Values $IgnoreDependency
+$ignoredContribExcludes = New-Object System.Collections.Generic.List[string]
 if ($ignoredDependencyNames.Count -gt 0) {
    $dependencyCatalogPath = Join-Path $ProjectRoot 'config\dependencies.json'
    if (-not (Test-Path -LiteralPath $dependencyCatalogPath)) {
@@ -982,6 +1440,15 @@ if ($ignoredDependencyNames.Count -gt 0) {
       $dependencyConfig = $dependencyCatalog.dependencies.$resolvedDependency
       if ($dependencyConfig.envVar) {
          $envMap[[string] $dependencyConfig.envVar] = 'no'
+      }
+
+      if ($null -ne $dependencyConfig.PSObject.Properties['contribExcludes'] -and $null -ne $dependencyConfig.contribExcludes) {
+         foreach ($contribExclude in @($dependencyConfig.contribExcludes)) {
+            $contribExcludeName = [string] $contribExclude
+            if (-not [string]::IsNullOrWhiteSpace($contribExcludeName) -and -not $ignoredContribExcludes.Contains($contribExcludeName)) {
+               $ignoredContribExcludes.Add($contribExcludeName)
+            }
+         }
       }
    }
 }
@@ -1030,6 +1497,40 @@ if (-not [string]::IsNullOrWhiteSpace($BuildParts)) {
 
 foreach ($key in $Env.Keys) {
    $envMap[$key] = [string] $Env[$key]
+}
+
+if ($ignoredContribExcludes.Count -gt 0) {
+   $currentContribFilter = ''
+   if ($envMap.Contains('HB_BUILD_CONTRIBS')) {
+      $currentContribFilter = [string] $envMap['HB_BUILD_CONTRIBS']
+   }
+   elseif (-not [string]::IsNullOrWhiteSpace($env:HB_BUILD_CONTRIBS)) {
+      $currentContribFilter = [string] $env:HB_BUILD_CONTRIBS
+   }
+
+   if ([string]::IsNullOrWhiteSpace($currentContribFilter)) {
+      $envMap['HB_BUILD_CONTRIBS'] = 'no ' + ($ignoredContribExcludes -join ' ')
+   }
+   elseif ($currentContribFilter -eq 'no') {
+      $envMap['HB_BUILD_CONTRIBS'] = 'no ' + ($ignoredContribExcludes -join ' ')
+   }
+   elseif ($currentContribFilter -like 'no *') {
+      $contribFilterParts = New-Object System.Collections.Generic.List[string]
+      foreach ($part in @($currentContribFilter -split '\s+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+         if (-not $contribFilterParts.Contains([string] $part)) {
+            $contribFilterParts.Add([string] $part)
+         }
+      }
+      foreach ($contribExclude in $ignoredContribExcludes) {
+         if (-not $contribFilterParts.Contains([string] $contribExclude)) {
+            $contribFilterParts.Add([string] $contribExclude)
+         }
+      }
+      $envMap['HB_BUILD_CONTRIBS'] = ($contribFilterParts -join ' ')
+   }
+   else {
+      Write-Warning "Nao foi possivel aplicar exclusoes de contrib para dependencias ignoradas porque HB_BUILD_CONTRIBS ja usa filtro positivo: $currentContribFilter"
+   }
 }
 
 $requestedTargets = @($Targets)
@@ -1098,6 +1599,9 @@ $commandDisplay = if ($runnerState.Name -eq 'windows') {
 }
 elseif ($runnerState.Name -eq 'cygwin') {
    "$(Format-ProjectPath $runnerState.CygwinBash) -lc $(Quote-ShArgument $shellScript)"
+}
+elseif ($runnerState.Name -eq 'msys') {
+   "$(Format-ProjectPath $runnerState.MsysBash) -lc $(Quote-ShArgument $shellScript)"
 }
 elseif ($runnerState.Name -eq 'docker') {
    "$($runnerState.DockerCommand) $(($dockerRunArgs | ForEach-Object { Format-CommandArgument ([string] $_) }) -join ' ')"
@@ -1197,6 +1701,11 @@ else {
             ForEach-Object { $_.ToString() } |
             Tee-Object -FilePath $logPath
       }
+      elseif ($runnerState.Name -eq 'msys') {
+         & $runnerState.MsysBash -lc $shellScript 2>&1 |
+            ForEach-Object { $_.ToString() } |
+            Tee-Object -FilePath $logPath
+      }
       elseif ($runnerState.Name -eq 'docker') {
          if (-not $SkipDockerBuild) {
             if (-not (Test-Path -LiteralPath $runnerState.Dockerfile)) {
@@ -1250,3 +1759,5 @@ else {
    Write-Host ''
    Write-Host 'Build concluido.'
 }
+
+$global:LASTEXITCODE = 0

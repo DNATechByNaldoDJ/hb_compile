@@ -19,17 +19,23 @@ RUN set -eux; \
       default-libmysqlclient-dev \
       firebird-dev \
       ghostscript \
+      liballegro4-dev \
       libbz2-dev \
       libcairo2-dev \
+      libcups2-dev \
       libcurl4-openssl-dev \
       libfreeimage-dev \
+      libgd-dev \
       libgs-dev \
       libmagic-dev \
       libncurses-dev \
+      libpcre3-dev \
       libpcre2-dev \
       libpq-dev \
+      libslang2-dev \
       libssl-dev \
       libsqlite3-dev \
+      unixodbc-dev \
       libx11-dev \
       zlib1g-dev"; \
     if [ "$INSTALL_QT" = "1" ]; then \

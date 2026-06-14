@@ -130,6 +130,9 @@
       "extraEnv": {
         "QT_SELECT": "6"
       },
+      "contribExcludes": [
+        "gtqtc"
+      ],
       "tools": [
         {
           "name": "moc.exe",

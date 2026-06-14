@@ -23,6 +23,7 @@ Harbour.
 - `config\dependencies.json`: catalogo de dependencias opcionais usadas no modo `-Full`.
 - `config\docker\linux\`: Dockerfiles para builds Linux reprodutiveis.
 - `config\external-deps.example.ps1`: modelo para dependencias opcionais `HB_WITH_*`.
+- `HOWTO.md`: guia central do processo de build, perfis, logs e troubleshooting.
 - `DEPENDENCIES.md`: guia de dependencias, conjuntos e wrappers full.
 - `OPENADS.md`: detalhes do fallback OpenADS usado pelo contrib `rddads`.
 - `scripts\Invoke-HarbourBuild.ps1`: executor principal.
@@ -123,15 +124,17 @@ O perfil `mingw64` exige um GCC MinGW-w64/MSYS2 no `PATH`. Se o primeiro
 `gcc.exe` encontrado for o do Cygwin, o build falha cedo com uma mensagem
 explicita; para esse toolchain use os wrappers `cygwin`.
 
-## Build Cygwin, WSL e Docker
+## Build Cygwin, MSYS, WSL e Docker
 
-Para Cygwin, instale pelo setup do Cygwin ao menos `gcc-core`, `make`, `binutils`
-e `git` se quiser clonar o Harbour por esse ambiente. O wrapper chama o
-`bash.exe` do Cygwin e roda `make` dentro dele:
+Para Cygwin, instale pelo setup do Cygwin ao menos `gcc-core`, `make`,
+`binutils` e `git` se quiser clonar o Harbour por esse ambiente. Pacotes
+opcionais de headers ficam listados em `HOWTO.md` e `DEPENDENCIES.md`. O wrapper
+chama o `bash.exe` do Cygwin e roda `make` dentro dele:
 
 ```powershell
 .\build-cygwin.ps1 -Clean
 .\build-full-cygwin.ps1 -Clean
+.\build-full-cygwin.ps1 -InstallSystemDependencies -CygwinSetup C:\Users\voce\Downloads\setup-x86_64.exe -IgnoreDependency qt -Clean
 ```
 
 O perfil Cygwin x64 injeta `HB_USER_CFLAGS=-march=x86-64 -mtune=generic`,
@@ -144,12 +147,35 @@ Se o Cygwin estiver fora de `C:\cygwin64` ou `C:\cygwin`, informe o caminho:
 .\build-cygwin.ps1 -CygwinBash D:\cygwin64\bin\bash.exe -Clean
 ```
 
+Para MSYS2 MSYS, instale no shell MSYS a base de build:
+
+```bash
+pacman -Syu
+pacman -S --needed base-devel make binutils gcc git pkgconf
+```
+
+O Harbour nao tem `HB_PLATFORM=msys`, entao este perfil usa
+`HB_PLATFORM=cygwin` com `MSYSTEM=MSYS` e `HB_BUILD_NAME=msys`, mas instala em
+`out\msys`:
+
+```powershell
+.\build-msys.ps1 -Clean
+.\build-full-msys.ps1 -Clean
+.\build-full-msys.ps1 -InstallSystemDependencies -IgnoreDependency qt -Clean
+```
+
+Se o MSYS2 estiver fora de `C:\msys64`, informe o caminho:
+
+```powershell
+.\build-msys.ps1 -MsysBash D:\msys64\usr\bin\bash.exe -Clean
+```
+
 Para Linux via WSL, instale dentro da distro pacotes como `build-essential`,
 `make`, `gcc` e `git`. Em distros Debian/Ubuntu:
 
 ```bash
 sudo apt update
-sudo apt install build-essential git
+sudo apt install build-essential git make binutils pkg-config ca-certificates file
 ```
 
 Depois rode do Windows:
@@ -157,6 +183,7 @@ Depois rode do Windows:
 ```powershell
 .\build-linux-wsl.ps1 -Clean
 .\build-full-linux-wsl.ps1 -Clean
+.\build-full-linux-wsl.ps1 -InstallSystemDependencies -IgnoreDependency qt -Clean
 ```
 
 Para escolher uma distro WSL especifica:
@@ -173,9 +200,9 @@ wrapper repassa isso como `wsl.exe --user <usuario>` e aguarda o WSL retornar:
 .\build-full-linux-wsl.ps1 -WslDistro Ubuntu-24.04 -WslUser seu_usuario -Clean
 ```
 
-Os perfis `cygwin` e `linux-wsl` usam dependencias do proprio ambiente POSIX.
-O modo full nao chama o resolvedor `vcpkg` do Windows nesses perfis; ele deixa o
-Makefile do Harbour detectar bibliotecas instaladas no Cygwin/WSL e ativa
+Os perfis `cygwin`, `msys` e `linux-wsl` usam dependencias do proprio ambiente
+POSIX. O modo full nao chama o resolvedor `vcpkg` do Windows nesses perfis; ele
+deixa o Makefile do Harbour detectar bibliotecas instaladas no ambiente e ativa
 `HB_INSTALL_3RDDYN=yes`.
 
 Para Linux reprodutivel, use Docker. O build normal usa
@@ -203,6 +230,8 @@ Tambem e possivel trocar imagem ou Dockerfile:
 
 Quando `-IgnoreDependency qt` e usado no Docker full, o script tambem passa
 `--build-arg INSTALL_QT=0` para evitar instalar os pacotes Qt na imagem.
+O Docker full instala as dependencias pelo `config\docker\linux\Dockerfile.full`;
+use `-SkipDockerBuild` apenas para reaproveitar uma imagem ja preparada.
 
 Na pratica, WSL e melhor para iterar no dia a dia; Docker e melhor para
 confirmar um build Linux limpo e reproduzivel.
@@ -287,8 +316,8 @@ Nos perfis Windows, o modo `-Full` usa `config\dependencies.json` para verificar
 dependencias opcionais e, quando possivel, instala-las via `vcpkg` em
 `tools\vcpkg`. Depois ele gera `config\external-deps.generated.<perfil>.ps1`
 com as variaveis `HB_WITH_*` que o Harbour espera. Perfis POSIX, como `cygwin`
-`linux-wsl` e `linux-docker`, usam as dependencias instaladas dentro do proprio
-ambiente.
+`msys`, `linux-wsl` e `linux-docker`, usam as dependencias instaladas dentro do
+proprio ambiente.
 
 Verificar sem instalar:
 
@@ -325,6 +354,7 @@ Wrappers equivalentes existem para os outros perfis comuns:
 .\build-full-mingw64.ps1 -Clean
 .\build-full-standard.ps1 -Clean
 .\build-full-cygwin.ps1 -Clean
+.\build-full-msys.ps1 -Clean
 .\build-full-linux-wsl.ps1 -Clean
 .\build-full-linux-docker.ps1 -Clean
 ```

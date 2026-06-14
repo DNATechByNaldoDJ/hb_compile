@@ -2,8 +2,8 @@
 
 O modo `-Full` prepara dependencias opcionais dos contribs do Harbour. Em
 perfis Windows ele chama `win-make.exe` e usa `vcpkg`; em perfis POSIX, como
-`cygwin`, `linux-wsl` e `linux-docker`, ele usa as bibliotecas ja instaladas no
-ambiente correspondente. A fonte da verdade para o resolvedor Windows fica em
+`cygwin`, `msys`, `linux-wsl` e `linux-docker`, ele usa as bibliotecas ja
+instaladas no ambiente correspondente. A fonte da verdade para o resolvedor Windows fica em
 `config\dependencies.json`.
 
 ## Fluxo
@@ -16,11 +16,104 @@ ambiente correspondente. A fonte da verdade para o resolvedor Windows fica em
 6. O build carrega primeiro o arquivo gerado e depois
    `config\external-deps.local.ps1`, permitindo override local.
 
-Nos perfis `cygwin`, `linux-wsl` e `linux-docker`, o fluxo pula o resolvedor
-`vcpkg` do Windows e nao carrega `external-deps.local.ps1`, para evitar misturar
-paths Windows com paths POSIX. Instale as dependencias opcionais diretamente no
-Cygwin/WSL, ou ajuste `config\docker\linux\Dockerfile.full` no caso Docker,
-quando quiser que o Makefile do Harbour as detecte.
+Nos perfis `cygwin`, `msys`, `linux-wsl` e `linux-docker`, o fluxo pula o
+resolvedor `vcpkg` do Windows e nao carrega `external-deps.local.ps1`, para
+evitar misturar paths Windows com paths POSIX. Instale as dependencias opcionais
+diretamente no Cygwin/MSYS/WSL, ou ajuste `config\docker\linux\Dockerfile.full`
+no caso Docker, quando quiser que o Makefile do Harbour as detecte.
+
+## Pacotes por ambiente
+
+O build full de perfis POSIX usa pacotes do proprio ambiente. Para tentar
+instalar automaticamente os pacotes conhecidos antes do build:
+
+```powershell
+.\build-full-cygwin.ps1 -InstallSystemDependencies -CygwinSetup C:\Users\voce\Downloads\setup-x86_64.exe -IgnoreDependency qt -Clean
+.\build-full-msys.ps1 -InstallSystemDependencies -IgnoreDependency qt -Clean
+.\build-full-linux-wsl.ps1 -InstallSystemDependencies -IgnoreDependency qt -Clean
+```
+
+Use `-SkipDependencyInstall` para impedir qualquer instalacao automatica.
+
+Base Cygwin:
+
+```text
+gcc-core
+make
+binutils
+git
+pkg-config
+```
+
+Pacotes Cygwin uteis para ampliar o build full:
+
+```text
+zlib-devel
+libpcre-devel
+libncurses-devel
+libslang-devel
+libX11-devel
+libsqlite3-devel
+libbz2-devel
+libexpat-devel
+unixODBC-devel
+libcups-devel
+libcurl-devel
+openssl-devel
+libpq-devel
+libmariadb-devel
+libcairo-devel
+libfreeimage-devel
+libgd-devel
+libmagic-devel
+ghostscript
+libgs-devel
+```
+
+Base MSYS2 MSYS:
+
+```bash
+pacman -Syu
+pacman -S --needed base-devel make binutils gcc git pkgconf
+```
+
+Pacotes MSYS2 MSYS uteis para ampliar o build full:
+
+```bash
+pacman -S --needed zlib-devel pcre-devel ncurses-devel libsqlite-devel libcurl-devel openssl-devel
+```
+
+O repositorio MSYS e limitado; PostgreSQL/libpq, MariaDB/MySQL, X11, Cairo, GD,
+FreeImage, Firebird, Oracle/OCILIB, Ghostscript, Allegro e Qt normalmente sao
+melhor cobertos em WSL, Docker, Cygwin ou MinGW.
+
+Base WSL Debian/Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install build-essential git make binutils pkg-config ca-certificates file
+```
+
+Pacotes Debian/Ubuntu uteis para ampliar o build full:
+
+```bash
+sudo apt install zlib1g-dev libpcre3-dev libncurses-dev libslang2-dev libx11-dev libssl-dev libcurl4-openssl-dev libpq-dev default-libmysqlclient-dev libsqlite3-dev libbz2-dev libexpat1-dev firebird-dev libcairo2-dev libfreeimage-dev libgd-dev libmagic-dev ghostscript libgs-dev libcups2-dev unixodbc-dev liballegro4-dev
+```
+
+Para testar Qt no WSL/Debian/Ubuntu:
+
+```bash
+sudo apt install qt6-base-dev qt6-base-dev-tools
+```
+
+Docker full usa `config\docker\linux\Dockerfile.full`, que instala a base e os
+headers opcionais durante o `docker build`. Use `-SkipDockerBuild` apenas quando
+quiser reaproveitar uma imagem ja preparada.
+
+Para Windows nativo, os perfis `standard`, `mingw64`, `msvc64` e `zig` usam o
+resolvedor `vcpkg` quando possivel. Ainda assim, SDKs proprietarios ou legados,
+como ADS, Oracle/OCILIB, Firebird client, Ghostscript e Allegro 4.x, podem
+exigir instalacao manual e variaveis `HB_WITH_*`.
 
 ## Wrappers full
 
@@ -30,6 +123,7 @@ quando quiser que o Makefile do Harbour as detecte.
 .\build-full-mingw64.ps1 -Clean
 .\build-full-standard.ps1 -Clean
 .\build-full-cygwin.ps1 -Clean
+.\build-full-msys.ps1 -Clean
 .\build-full-linux-wsl.ps1 -Clean
 .\build-full-linux-docker.ps1 -Clean
 ```
@@ -41,7 +135,7 @@ Triplets padrao:
 - `build-full-mingw64.ps1`: usa `x64-mingw-dynamic`.
 - `build-full-standard.ps1`: preserva a autodeteccao do Harbour e usa o
   triplet padrao do catalogo.
-- `build-full-cygwin.ps1`, `build-full-linux-wsl.ps1` e
+- `build-full-cygwin.ps1`, `build-full-msys.ps1`, `build-full-linux-wsl.ps1` e
   `build-full-linux-docker.ps1`: nao usam triplet `vcpkg`; dependem dos
   pacotes instalados no ambiente POSIX.
 
@@ -77,7 +171,9 @@ Exemplos:
 `-IgnoreDependency` aceita uma ou mais dependencias e gera `HB_WITH_*=no` para
 elas, evitando tanto instalacao quanto autodeteccao pelo Makefile do Harbour.
 Use isso para dependencias demoradas ou indesejadas em uma rodada de validacao,
-por exemplo `-IgnoreDependency qt`.
+por exemplo `-IgnoreDependency qt`. Quando a dependencia tem contribs
+diretamente associados, o executor tambem pode exclui-los; hoje `qt` acrescenta
+`HB_BUILD_CONTRIBS=no gtqtc` para evitar a inicializacao do plugin Qt.
 
 ## Dependencias automatizaveis
 
