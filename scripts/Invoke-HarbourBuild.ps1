@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-   [string] $Profile = 'auto',
+   [Alias('Profile')]
+   [string] $BuildProfile = 'auto',
    [string[]] $Targets = @('install'),
    [switch] $Clean,
    [switch] $Minimal,
@@ -30,6 +31,9 @@ param(
    [switch] $ListProfiles,
    [switch] $NoVsDevShell,
    [string] $VsArch = 'amd64',
+   [string] $ZigPath = '',
+   [string] $MinGwPath = '',
+   [switch] $SkipToolBootstrap,
    [string] $CygwinSetup = '',
    [string] $CygwinBash = '',
    [string] $MsysBash = '',
@@ -127,17 +131,278 @@ function Get-ProfileInstallRoot {
    return Join-Path $OutputRoot $subdir
 }
 
+function Get-MinGwGccProbe {
+   param([string] $GccPath = '')
+
+   if ([string]::IsNullOrWhiteSpace($GccPath)) {
+      $commands = @(
+         'x86_64-w64-mingw32-gcc.exe',
+         'gcc.exe',
+         'x86_64-w64-mingw32-gcc',
+         'gcc'
+      )
+      $firstInvalid = $null
+      foreach ($commandName in $commands) {
+         $gcc = Get-Command $commandName -ErrorAction SilentlyContinue
+         if (-not $gcc) {
+            continue
+         }
+
+         $probe = Get-MinGwGccProbe -GccPath ([string] $gcc.Source)
+         if ($probe.Valid) {
+            return $probe
+         }
+
+         if (-not $firstInvalid) {
+            $firstInvalid = $probe
+         }
+      }
+
+      if ($firstInvalid) {
+         return $firstInvalid
+      }
+
+      return [pscustomobject]@{
+         Found = $false
+         Valid = $false
+         Path = ''
+         DumpMachine = ''
+         Prefix = ''
+         BinDir = ''
+         Reason = 'gcc.exe MinGW-w64 nao foi encontrado no PATH.'
+      }
+   }
+
+   if (-not (Test-Path -LiteralPath $GccPath)) {
+      return [pscustomobject]@{
+         Found = $false
+         Valid = $false
+         Path = $GccPath
+         DumpMachine = ''
+         Prefix = ''
+         BinDir = ''
+         Reason = "gcc.exe nao encontrado: $GccPath"
+      }
+   }
+
+   $dumpMachine = ''
+   try {
+      $dumpMachine = (& $GccPath -dumpmachine 2>$null | Select-Object -First 1)
+   }
+   catch {
+      $dumpMachine = ''
+   }
+
+   $leafName = [System.IO.Path]::GetFileName($GccPath)
+   $prefix = ''
+   if ($leafName -match '^(?<prefix>.+-)gcc(?:-\d[\d.]*)?\.exe$') {
+      $prefix = [string] $Matches.prefix
+   }
+
+   $valid = $dumpMachine -match '^x86_64-.*(mingw|w64)' -and $dumpMachine -notmatch 'cygwin' -and $GccPath -notmatch '\\cygwin(64)?\\'
+   $reason = if ($valid) {
+      ''
+   }
+   elseif ($GccPath -match '\\cygwin(64)?\\' -or $dumpMachine -match 'cygwin') {
+      "gcc do Cygwin encontrado ($GccPath; target=$dumpMachine)."
+   }
+   elseif ([string]::IsNullOrWhiteSpace($dumpMachine)) {
+      "Nao foi possivel executar '$GccPath -dumpmachine'."
+   }
+   elseif ($dumpMachine -notmatch '^x86_64-') {
+      "gcc MinGW incompativel encontrado ($GccPath; target=$dumpMachine); o perfil mingw64 requer x86_64."
+   }
+   else {
+      "gcc incompativel encontrado ($GccPath; target=$dumpMachine)."
+   }
+
+   return [pscustomobject]@{
+      Found = $true
+      Valid = $valid
+      Path = $GccPath
+      DumpMachine = $dumpMachine
+      Prefix = $prefix
+      BinDir = [System.IO.Path]::GetDirectoryName($GccPath)
+      Reason = $reason
+   }
+}
+
+function Get-ZigProbe {
+   param([string] $ZigPath = '')
+
+   if ([string]::IsNullOrWhiteSpace($ZigPath)) {
+      $zig = Get-Command 'zig.exe' -ErrorAction SilentlyContinue
+      if (-not $zig) {
+         $zig = Get-Command 'zig' -ErrorAction SilentlyContinue
+      }
+
+      if (-not $zig) {
+         return [pscustomobject]@{
+            Found = $false
+            Valid = $false
+            Path = ''
+            Version = ''
+            Reason = 'zig.exe nao foi encontrado no PATH.'
+         }
+      }
+
+      $ZigPath = [string] $zig.Source
+   }
+
+   if (-not (Test-Path -LiteralPath $ZigPath)) {
+      return [pscustomobject]@{
+         Found = $false
+         Valid = $false
+         Path = $ZigPath
+         Version = ''
+         Reason = "zig.exe nao encontrado: $ZigPath"
+      }
+   }
+
+   $version = ''
+   try {
+      $version = (& $ZigPath version 2>$null | Select-Object -First 1).Trim()
+   }
+   catch {
+      $version = ''
+   }
+
+   $valid = -not [string]::IsNullOrWhiteSpace($version)
+   $reason = if ($valid) {
+      ''
+   }
+   else {
+      "Nao foi possivel executar '$ZigPath version'."
+   }
+
+   return [pscustomobject]@{
+      Found = $true
+      Valid = $valid
+      Path = $ZigPath
+      Version = $version
+      Reason = $reason
+   }
+}
+
+function Find-MinGwGccInRoot {
+   param([Parameter(Mandatory = $true)][string] $Root)
+
+   if (-not (Test-Path -LiteralPath $Root)) {
+      return $null
+   }
+
+   $rootFull = [System.IO.Path]::GetFullPath($Root)
+   $directCandidates = @(
+      (Join-Path $rootFull 'gcc.exe'),
+      (Join-Path $rootFull 'bin\gcc.exe'),
+      (Join-Path $rootFull 'mingw64\bin\gcc.exe'),
+      (Join-Path $rootFull 'x86_64-w64-mingw32-gcc.exe'),
+      (Join-Path $rootFull 'bin\x86_64-w64-mingw32-gcc.exe'),
+      (Join-Path $rootFull 'mingw64\bin\x86_64-w64-mingw32-gcc.exe')
+   )
+
+   foreach ($candidate in $directCandidates) {
+      $probe = Get-MinGwGccProbe -GccPath $candidate
+      if ($probe.Valid) {
+         return (Get-Item -LiteralPath $candidate)
+      }
+   }
+
+   return Get-ChildItem -LiteralPath $rootFull -Filter '*gcc.exe' -Recurse -ErrorAction SilentlyContinue |
+      Where-Object { (Get-MinGwGccProbe -GccPath $_.FullName).Valid } |
+      Sort-Object -Property FullName |
+      Select-Object -First 1
+}
+
+function Find-ZigExeInRoot {
+   param([Parameter(Mandatory = $true)][string] $Root)
+
+   if (-not (Test-Path -LiteralPath $Root)) {
+      return $null
+   }
+
+   $rootFull = [System.IO.Path]::GetFullPath($Root)
+   if ((Test-Path -LiteralPath $rootFull -PathType Leaf) -and
+      ([System.IO.Path]::GetFileName($rootFull) -ieq 'zig.exe')) {
+      $probe = Get-ZigProbe -ZigPath $rootFull
+      if ($probe.Valid) {
+         return (Get-Item -LiteralPath $rootFull)
+      }
+   }
+
+   $directCandidates = @(
+      (Join-Path $rootFull 'zig.exe'),
+      (Join-Path $rootFull 'bin\zig.exe')
+   )
+
+   foreach ($candidate in $directCandidates) {
+      $probe = Get-ZigProbe -ZigPath $candidate
+      if ($probe.Valid) {
+         return (Get-Item -LiteralPath $candidate)
+      }
+   }
+
+   return Get-ChildItem -LiteralPath $rootFull -Filter 'zig.exe' -Recurse -ErrorAction SilentlyContinue |
+      Where-Object { (Get-ZigProbe -ZigPath $_.FullName).Valid } |
+      Sort-Object -Property FullName |
+      Select-Object -First 1
+}
+
+function Add-PathPrefix {
+   param([Parameter(Mandatory = $true)][string] $Directory)
+
+   $fullDirectory = [System.IO.Path]::GetFullPath($Directory)
+   $parts = @($env:PATH -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+   $alreadyPresent = @($parts | Where-Object { $_.TrimEnd('\') -ieq $fullDirectory.TrimEnd('\') }).Count -gt 0
+   if (-not $alreadyPresent) {
+      $env:PATH = "$fullDirectory;$env:PATH"
+   }
+}
+
+function Add-MinGwToolchainPath {
+   param([Parameter(Mandatory = $true)][string] $Path)
+
+   $fullPath = Resolve-ProjectPath $Path
+   $gcc = Find-MinGwGccInRoot -Root $fullPath
+   if (-not $gcc) {
+      throw "MinGW-w64 nao encontrado em '$Path'. Informe a pasta que contem bin\gcc.exe. A pasta de fontes mingw-w64 nao e um toolchain compilado."
+   }
+
+   Add-PathPrefix -Directory $gcc.Directory.FullName
+   $probe = Get-MinGwGccProbe -GccPath $gcc.FullName
+   Write-Host "Usando MinGW-w64: $($probe.Path) ($($probe.DumpMachine))"
+}
+
+function Add-ZigToolchainPath {
+   param([Parameter(Mandatory = $true)][string] $Path)
+
+   $fullPath = Resolve-ProjectPath $Path
+   $zig = Find-ZigExeInRoot -Root $fullPath
+   if (-not $zig) {
+      throw "Zig nao encontrado em '$Path'. Informe zig.exe ou a pasta que contem zig.exe."
+   }
+
+   Add-PathPrefix -Directory $zig.Directory.FullName
+   $probe = Get-ZigProbe -ZigPath $zig.FullName
+   Write-Host "Usando Zig: $($probe.Path) ($($probe.Version))"
+}
+
 function Add-LocalToolPaths {
    param([Parameter(Mandatory = $true)][string] $ToolsRoot)
 
+   $mingwRoot = Join-Path $ToolsRoot 'mingw64'
+   if (Test-Path -LiteralPath $mingwRoot) {
+      $gcc = Find-MinGwGccInRoot -Root $mingwRoot
+      if ($gcc) {
+         Add-PathPrefix -Directory $gcc.Directory.FullName
+      }
+   }
+
    $zigRoot = Join-Path $ToolsRoot 'zig'
    if (Test-Path -LiteralPath $zigRoot) {
-      $zig = Get-ChildItem -LiteralPath $zigRoot -Filter 'zig.exe' -Recurse -ErrorAction SilentlyContinue |
-         Sort-Object -Property FullName |
-         Select-Object -First 1
-
+      $zig = Find-ZigExeInRoot -Root $zigRoot
       if ($zig) {
-         $env:PATH = "$($zig.Directory.FullName);$env:PATH"
+         Add-PathPrefix -Directory $zig.Directory.FullName
       }
    }
 }
@@ -238,7 +503,7 @@ function Get-ConfigBoolean {
    return $Default
 }
 
-function Quote-ShArgument {
+function Format-ShArgument {
    param([string] $Value)
 
    if ($null -eq $Value) {
@@ -563,9 +828,9 @@ function Invoke-SystemDependencyInstall {
          }
       }
       'msys' {
-         $script = "pacman -S --needed --noconfirm $(($Packages | ForEach-Object { Quote-ShArgument ([string] $_) }) -join ' ')"
+         $script = "pacman -S --needed --noconfirm $(($Packages | ForEach-Object { Format-ShArgument ([string] $_) }) -join ' ')"
          if ($DryRun) {
-            Write-Host "DryRun: $($RunnerState.MsysBash) -lc $(Quote-ShArgument $script)"
+            Write-Host "DryRun: $($RunnerState.MsysBash) -lc $(Format-ShArgument $script)"
             return
          }
 
@@ -576,12 +841,12 @@ function Invoke-SystemDependencyInstall {
          }
       }
       'wsl' {
-         $packageList = ($Packages | ForEach-Object { Quote-ShArgument ([string] $_) }) -join ' '
+         $packageList = ($Packages | ForEach-Object { Format-ShArgument ([string] $_) }) -join ' '
          $script = "if [ `$(id -u) -eq 0 ]; then SUDO=; else SUDO=sudo; fi; `$SUDO apt-get update && `$SUDO apt-get install -y --no-install-recommends $packageList"
          $arguments = @($WslArguments) + @('bash', '-lc', $script)
          if ($DryRun) {
             $prefix = if ($WslArguments.Count -gt 0) { "wsl.exe $($WslArguments -join ' ')" } else { 'wsl.exe' }
-            Write-Host "DryRun: $prefix bash -lc $(Quote-ShArgument $script)"
+            Write-Host "DryRun: $prefix bash -lc $(Format-ShArgument $script)"
             return
          }
 
@@ -691,7 +956,7 @@ function Assert-CygwinTool {
       [Parameter(Mandatory = $true)][string] $Name
    )
 
-   & $BashPath -lc "command -v $(Quote-ShArgument $Name) >/dev/null"
+   & $BashPath -lc "command -v $(Format-ShArgument $Name) >/dev/null"
    if ($LASTEXITCODE -ne 0) {
       throw "Ferramenta '$Name' nao foi encontrada dentro do Cygwin. Instale o pacote correspondente pelo setup do Cygwin."
    }
@@ -703,7 +968,7 @@ function Assert-MsysTool {
       [Parameter(Mandatory = $true)][string] $Name
    )
 
-   & $BashPath -lc "command -v $(Quote-ShArgument $Name) >/dev/null"
+   & $BashPath -lc "command -v $(Format-ShArgument $Name) >/dev/null"
    if ($LASTEXITCODE -ne 0) {
       throw "Ferramenta '$Name' nao foi encontrada dentro do MSYS2. Instale o pacote correspondente com pacman."
    }
@@ -733,7 +998,7 @@ function Assert-WslTool {
       [string] $User = ''
    )
 
-   $arguments = (Get-WslArguments -Distro $Distro -User $User) + @('bash', '-lc', "command -v $(Quote-ShArgument $Name) >/dev/null")
+   $arguments = (Get-WslArguments -Distro $Distro -User $User) + @('bash', '-lc', "command -v $(Format-ShArgument $Name) >/dev/null")
    & wsl.exe @arguments
    if ($LASTEXITCODE -ne 0) {
       throw "Ferramenta '$Name' nao foi encontrada no WSL. Instale os pacotes de build dentro da distro WSL."
@@ -742,34 +1007,103 @@ function Assert-WslTool {
 
 function Assert-WindowsMinGwToolchain {
    param(
-      [Parameter(Mandatory = $true)][string] $Compiler
+      [Parameter(Mandatory = $true)][string] $Compiler,
+      [Parameter(Mandatory = $true)][string] $ToolsRoot,
+      [string] $ExplicitPath = '',
+      [switch] $SkipBootstrap,
+      [switch] $DryRun
    )
 
    if ($Compiler -notlike 'mingw*') {
       return
    }
 
-   $gcc = Get-Command 'gcc.exe' -ErrorAction SilentlyContinue
-   if (-not $gcc) {
-      throw "Perfil '$Compiler' requer MinGW-w64 no PATH, mas gcc.exe nao foi encontrado. Instale MSYS2/MinGW-w64 ou ajuste o PATH antes do Cygwin."
+   if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+      Add-MinGwToolchainPath -Path $ExplicitPath
    }
 
-   $gccPath = [string] $gcc.Source
-   $dumpMachine = ''
-   try {
-      $dumpMachine = (& $gccPath -dumpmachine 2>$null | Select-Object -First 1)
-   }
-   catch {
-      $dumpMachine = ''
+   $probe = Get-MinGwGccProbe
+   if ($probe.Valid) {
+      Write-Host "Toolchain MinGW-w64 detectado: $($probe.Path) ($($probe.DumpMachine))"
+      return $probe
    }
 
-   if ($gccPath -match '\\cygwin(64)?\\' -or $dumpMachine -match 'cygwin') {
-      throw "Perfil '$Compiler' encontrou gcc do Cygwin ($gccPath; target=$dumpMachine). Use o perfil 'cygwin' para esse toolchain ou coloque um MinGW-w64/MSYS2 gcc no PATH antes do Cygwin."
+   if (-not $SkipBootstrap) {
+      $bootstrap = Join-Path $ProjectRoot 'scripts\Bootstrap-Tools.ps1'
+      if (-not (Test-Path -LiteralPath $bootstrap)) {
+         throw "Bootstrap de ferramentas nao encontrado: $bootstrap"
+      }
+
+      if ($DryRun) {
+         Write-Host "DryRun: .\scripts\Bootstrap-Tools.ps1 -Tool MinGW64"
+         return
+      }
+
+      Write-Host "MinGW-w64 valido nao encontrado ($($probe.Reason)). Baixando toolchain portatil..."
+      & $bootstrap -Tool MinGW64
+      if (-not $?) {
+         throw 'Falha ao baixar MinGW-w64.'
+      }
+
+      Add-LocalToolPaths -ToolsRoot $ToolsRoot
+      $probe = Get-MinGwGccProbe
+      if ($probe.Valid) {
+         Write-Host "Toolchain MinGW-w64 detectado: $($probe.Path) ($($probe.DumpMachine))"
+         return $probe
+      }
    }
 
-   if ($dumpMachine -and $dumpMachine -notmatch 'mingw|w64') {
-      throw "Perfil '$Compiler' encontrou gcc incompativel ($gccPath; target=$dumpMachine). Use um toolchain MinGW-w64/MSYS2."
+   if ($probe.Path -match '\\cygwin(64)?\\' -or $probe.DumpMachine -match 'cygwin') {
+      throw "Perfil '$Compiler' encontrou gcc do Cygwin ($($probe.Path); target=$($probe.DumpMachine)). Use -MinGwPath para informar um toolchain MinGW-w64, execute .\scripts\Bootstrap-Tools.ps1 -Tool MinGW64, ou coloque MinGW-w64/MSYS2 no PATH antes do Cygwin."
    }
+
+   throw "Perfil '$Compiler' requer MinGW-w64, mas $($probe.Reason) Use -MinGwPath, execute .\scripts\Bootstrap-Tools.ps1 -Tool MinGW64, ou ajuste o PATH."
+}
+
+function Assert-ZigToolchain {
+   param(
+      [Parameter(Mandatory = $true)][string] $ToolsRoot,
+      [string] $ExplicitPath = '',
+      [switch] $SkipBootstrap,
+      [switch] $DryRun
+   )
+
+   if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+      Add-ZigToolchainPath -Path $ExplicitPath
+   }
+
+   $probe = Get-ZigProbe
+   if ($probe.Valid) {
+      Write-Host "Toolchain Zig detectado: $($probe.Path) ($($probe.Version))"
+      return
+   }
+
+   if (-not $SkipBootstrap) {
+      $bootstrap = Join-Path $ProjectRoot 'scripts\Bootstrap-Tools.ps1'
+      if (-not (Test-Path -LiteralPath $bootstrap)) {
+         throw "Bootstrap de ferramentas nao encontrado: $bootstrap"
+      }
+
+      if ($DryRun) {
+         Write-Host "DryRun: .\scripts\Bootstrap-Tools.ps1 -Tool Zig"
+         return
+      }
+
+      Write-Host "Zig valido nao encontrado ($($probe.Reason)). Baixando toolchain portatil..."
+      & $bootstrap -Tool Zig
+      if (-not $?) {
+         throw 'Falha ao baixar Zig.'
+      }
+
+      Add-LocalToolPaths -ToolsRoot $ToolsRoot
+      $probe = Get-ZigProbe
+      if ($probe.Valid) {
+         Write-Host "Toolchain Zig detectado: $($probe.Path) ($($probe.Version))"
+         return
+      }
+   }
+
+   throw "Perfil Zig requer zig.exe, mas $($probe.Reason) Use -ZigPath, execute .\scripts\Bootstrap-Tools.ps1 -Tool Zig, ou ajuste o PATH."
 }
 
 function Initialize-Runner {
@@ -886,7 +1220,7 @@ function ConvertTo-CygwinPath {
       [Parameter(Mandatory = $true)][string] $BashPath
    )
 
-   $converted = & $BashPath -lc "cygpath -au $(Quote-ShArgument $Path)"
+   $converted = & $BashPath -lc "cygpath -au $(Format-ShArgument $Path)"
    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string] $converted)) {
       throw "Falha ao converter path para Cygwin: $Path"
    }
@@ -900,7 +1234,7 @@ function ConvertTo-MsysPath {
       [Parameter(Mandatory = $true)][string] $BashPath
    )
 
-   $converted = & $BashPath -lc "cygpath -au $(Quote-ShArgument $Path)" 2>$null
+   $converted = & $BashPath -lc "cygpath -au $(Format-ShArgument $Path)" 2>$null
    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace([string] $converted)) {
       return [string] ($converted | Select-Object -Last 1)
    }
@@ -1046,18 +1380,18 @@ function New-ShellBuildScript {
 
    $targetRoot = Convert-PathForRunner -Path $HarbourRoot -RunnerState $RunnerState
    $assignments = foreach ($key in $EnvMap.Keys) {
-      "$key=$(Quote-ShArgument ([string] $EnvMap[$key]))"
+      "$key=$(Format-ShArgument ([string] $EnvMap[$key]))"
    }
    $commands = @()
    if ($CleanMakeArgs.Count -gt 0) {
-      $cleanCommand = (@('make') + $CleanMakeArgs | ForEach-Object { Quote-ShArgument ([string] $_) }) -join ' '
+      $cleanCommand = (@('make') + $CleanMakeArgs | ForEach-Object { Format-ShArgument ([string] $_) }) -join ' '
       $commands += "env $($assignments -join ' ') $cleanCommand"
    }
 
-   $makeCommand = (@('make') + $MakeArgs | ForEach-Object { Quote-ShArgument ([string] $_) }) -join ' '
+   $makeCommand = (@('make') + $MakeArgs | ForEach-Object { Format-ShArgument ([string] $_) }) -join ' '
    $commands += "env $($assignments -join ' ') $makeCommand"
 
-   return "cd $(Quote-ShArgument $targetRoot) && $($commands -join ' && ')"
+   return "cd $(Format-ShArgument $targetRoot) && $($commands -join ' && ')"
 }
 
 function New-DockerBuildArguments {
@@ -1216,7 +1550,7 @@ if ($ListProfiles) {
    return
 }
 
-$ProfileConfig = Get-ProfileConfig -Config $Config -Name $Profile
+$ProfileConfig = Get-ProfileConfig -Config $Config -Name $BuildProfile
 $Runner = (Get-ConfigString -Config $ProfileConfig -Name 'runner' -Default 'windows').ToLowerInvariant()
 $defaultDependencyMode = if ($Runner -eq 'windows') { 'vcpkg' } else { 'system' }
 $DependencyMode = (Get-ConfigString -Config $ProfileConfig -Name 'dependencyMode' -Default $defaultDependencyMode).ToLowerInvariant()
@@ -1286,30 +1620,34 @@ $runnerState = Initialize-Runner `
 foreach ($requirement in (@($ProfileConfig.requires) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
    switch ($requirement) {
       'zig' {
-         Assert-Command -Name 'zig.exe' -Hint 'Execute .\scripts\Bootstrap-Tools.ps1 -Tool Zig ou adicione o Zig ao PATH.'
+         Assert-ZigToolchain `
+            -ToolsRoot $ToolsRoot `
+            -ExplicitPath $ZigPath `
+            -SkipBootstrap:$SkipToolBootstrap `
+            -DryRun:$DryRun
       }
       'cygwin' {
          if ($runnerState.Name -ne 'cygwin') {
-            throw "Perfil '$Profile' requer Cygwin, mas usa runner '$($runnerState.Name)'."
+            throw "Perfil '$BuildProfile' requer Cygwin, mas usa runner '$($runnerState.Name)'."
          }
       }
       'msys' {
          if ($runnerState.Name -ne 'msys') {
-            throw "Perfil '$Profile' requer MSYS2, mas usa runner '$($runnerState.Name)'."
+            throw "Perfil '$BuildProfile' requer MSYS2, mas usa runner '$($runnerState.Name)'."
          }
       }
       'wsl' {
          if ($runnerState.Name -ne 'wsl') {
-            throw "Perfil '$Profile' requer WSL, mas usa runner '$($runnerState.Name)'."
+            throw "Perfil '$BuildProfile' requer WSL, mas usa runner '$($runnerState.Name)'."
          }
       }
       'docker' {
          if ($runnerState.Name -ne 'docker') {
-            throw "Perfil '$Profile' requer Docker, mas usa runner '$($runnerState.Name)'."
+            throw "Perfil '$BuildProfile' requer Docker, mas usa runner '$($runnerState.Name)'."
          }
       }
       default {
-         throw "Pre-requisito desconhecido no perfil '$Profile': $requirement"
+         throw "Pre-requisito desconhecido no perfil '$BuildProfile': $requirement"
       }
    }
 }
@@ -1318,11 +1656,25 @@ if (-not $NoVsDevShell -and ($ProfileConfig.autoVsDevShell -eq $true)) {
    Import-VsDevShell -Arch $VsArch
 }
 
+$detectedMinGwToolchain = $null
 if ($Runner -eq 'windows' -and -not $DryRun) {
-   Assert-WindowsMinGwToolchain -Compiler ([string] $ProfileConfig.env.HB_COMPILER)
+   $detectedMinGwToolchain = Assert-WindowsMinGwToolchain `
+      -Compiler ([string] $ProfileConfig.env.HB_COMPILER) `
+      -ToolsRoot $ToolsRoot `
+      -ExplicitPath $MinGwPath `
+      -SkipBootstrap:$SkipToolBootstrap `
+      -DryRun:$DryRun
+}
+elseif ($Runner -eq 'windows' -and $DryRun) {
+   $detectedMinGwToolchain = Assert-WindowsMinGwToolchain `
+      -Compiler ([string] $ProfileConfig.env.HB_COMPILER) `
+      -ToolsRoot $ToolsRoot `
+      -ExplicitPath $MinGwPath `
+      -SkipBootstrap:$SkipToolBootstrap `
+      -DryRun:$DryRun
 }
 
-$safeProfile = $Profile -replace '[^A-Za-z0-9_.-]', '_'
+$safeProfile = $BuildProfile -replace '[^A-Za-z0-9_.-]', '_'
 $generatedDeps = Join-Path $ProjectRoot "config\external-deps.generated.$safeProfile.ps1"
 if ($Full) {
    if ($DependencyMode -eq 'vcpkg') {
@@ -1365,7 +1717,7 @@ if ($Full) {
       }
    }
    elseif ($DependencyMode -eq 'system') {
-      Write-Host "Perfil '$Profile' usa dependencias do sistema; o resolvedor vcpkg do Windows sera ignorado."
+      Write-Host "Perfil '$BuildProfile' usa dependencias do sistema; o resolvedor vcpkg do Windows sera ignorado."
       if ($SkipDependencyInstall) {
          Write-Host "Instalacao de dependencias do sistema ignorada por -SkipDependencyInstall."
       }
@@ -1394,7 +1746,7 @@ if ($Full) {
       }
    }
    else {
-      throw "Modo de dependencia desconhecido no perfil '$Profile': $DependencyMode"
+      throw "Modo de dependencia desconhecido no perfil '$BuildProfile': $DependencyMode"
    }
 }
 
@@ -1416,7 +1768,7 @@ if ($Jobs -le 0) {
    }
 }
 
-$installRoot = Get-ProfileInstallRoot -Config $Config -Name $Profile -OutputRoot $OutputRoot
+$installRoot = Get-ProfileInstallRoot -Config $Config -Name $BuildProfile -OutputRoot $OutputRoot
 New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
 
 $envMap = [ordered]@{}
@@ -1424,6 +1776,24 @@ $envMap['HB_INSTALL_PREFIX'] = $installRoot
 
 foreach ($item in @($ProfileConfig.env.PSObject.Properties)) {
    $envMap[$item.Name] = [string] $item.Value
+}
+
+if ($detectedMinGwToolchain -and $detectedMinGwToolchain.Valid -and -not [string]::IsNullOrWhiteSpace($detectedMinGwToolchain.BinDir)) {
+   $compilerPath = [string] $detectedMinGwToolchain.BinDir
+   if (-not $compilerPath.EndsWith('\')) {
+      $compilerPath = "$compilerPath\"
+   }
+
+   if (-not $envMap.Contains('HB_CCPATH') -and [string]::IsNullOrWhiteSpace($env:HB_CCPATH)) {
+      $envMap['HB_CCPATH'] = $compilerPath
+   }
+
+   $compilerPrefix = [string] $detectedMinGwToolchain.Prefix
+   if (-not [string]::IsNullOrWhiteSpace($compilerPrefix) -and
+      -not $envMap.Contains('HB_CCPREFIX') -and
+      [string]::IsNullOrWhiteSpace($env:HB_CCPREFIX)) {
+      $envMap['HB_CCPREFIX'] = $compilerPrefix
+   }
 }
 
 $ignoredDependencyNames = Expand-NameList -Values $IgnoreDependency
@@ -1467,7 +1837,7 @@ if ($ProfileConfig.hostBinProfile) {
             $hostBin = $fallbackBin
          }
          else {
-            throw "O perfil '$Profile' requer HB_HOST_BIN. Compile primeiro o perfil '$hostProfile' ou defina HB_HOST_BIN."
+            throw "O perfil '$BuildProfile' requer HB_HOST_BIN. Compile primeiro o perfil '$hostProfile' ou defina HB_HOST_BIN."
          }
       }
 
@@ -1567,7 +1937,7 @@ if ($runCleanFirst) {
 }
 $makeArgs = @("-j$Jobs") + $targetList + $MakeArg
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$safeProfile = $Profile -replace '[^A-Za-z0-9_.-]', '_'
+$safeProfile = $BuildProfile -replace '[^A-Za-z0-9_.-]', '_'
 $logPath = Join-Path $LogsRoot "$stamp-$safeProfile.log"
 $targetEnvMap = Convert-EnvMapForRunner -EnvMap $envMap -RunnerState $runnerState
 $shellScript = ''
@@ -1598,17 +1968,17 @@ $commandDisplay = if ($runnerState.Name -eq 'windows') {
    "$(Format-ProjectPath $makeExe) $($makeArgs -join ' ')"
 }
 elseif ($runnerState.Name -eq 'cygwin') {
-   "$(Format-ProjectPath $runnerState.CygwinBash) -lc $(Quote-ShArgument $shellScript)"
+   "$(Format-ProjectPath $runnerState.CygwinBash) -lc $(Format-ShArgument $shellScript)"
 }
 elseif ($runnerState.Name -eq 'msys') {
-   "$(Format-ProjectPath $runnerState.MsysBash) -lc $(Quote-ShArgument $shellScript)"
+   "$(Format-ProjectPath $runnerState.MsysBash) -lc $(Format-ShArgument $shellScript)"
 }
 elseif ($runnerState.Name -eq 'docker') {
    "$($runnerState.DockerCommand) $(($dockerRunArgs | ForEach-Object { Format-CommandArgument ([string] $_) }) -join ' ')"
 }
 else {
    $wslPrefix = if ($runnerState.WslArguments.Count -gt 0) { "wsl.exe $($runnerState.WslArguments -join ' ')" } else { 'wsl.exe' }
-   "$wslPrefix bash -lc $(Quote-ShArgument $shellScript)"
+   "$wslPrefix bash -lc $(Format-ShArgument $shellScript)"
 }
 $dockerBuildDisplay = ''
 if ($runnerState.Name -eq 'docker' -and -not $SkipDockerBuild) {
@@ -1616,7 +1986,7 @@ if ($runnerState.Name -eq 'docker' -and -not $SkipDockerBuild) {
 }
 
 Write-Host "HarbourRoot : $(Format-ProjectPath $HarbourRoot)"
-Write-Host "Perfil      : $Profile"
+Write-Host "Perfil      : $BuildProfile"
 Write-Host "Runner      : $($runnerState.Name)"
 if ($runnerState.Name -eq 'docker') {
    Write-Host "DockerImage : $($runnerState.DockerImage)"

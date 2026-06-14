@@ -190,9 +190,12 @@ resolvedor usa `x64-mingw-dynamic` por padrao. Algumas portas do vcpkg, como
 desativadas automaticamente quando nao houver override manual.
 
 O wrapper `build-full-mingw64.ps1` tambem valida o toolchain antes de resolver
-dependencias: `gcc -dumpmachine` precisa apontar para MinGW-w64/MSYS2. Se o
-`gcc.exe` encontrado for o do Cygwin, use `build-full-cygwin.ps1` ou coloque o
-MinGW no `PATH` antes do Cygwin.
+dependencias: `gcc -dumpmachine` precisa apontar para MinGW-w64/MSYS2. A
+prioridade e `-MinGwPath`, `tools\mingw64`, `PATH` valido e bootstrap
+automatico via `scripts\Bootstrap-Tools.ps1 -Tool MinGW64`. Se quiser apenas
+validar o ambiente atual, use `-SkipToolBootstrap`. Se o `gcc.exe` encontrado
+for o do Cygwin e o bootstrap estiver desativado, use `build-full-cygwin.ps1`
+ou informe um MinGW-w64 real com `-MinGwPath`.
 
 ## Dependencias manuais
 

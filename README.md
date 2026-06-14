@@ -27,8 +27,8 @@ Harbour.
 - `DEPENDENCIES.md`: guia de dependencias, conjuntos e wrappers full.
 - `OPENADS.md`: detalhes do fallback OpenADS usado pelo contrib `rddads`.
 - `scripts\Invoke-HarbourBuild.ps1`: executor principal.
-- `scripts\Bootstrap-Tools.ps1`: baixa ferramentas locais, hoje focado em Zig.
-- `scripts\Show-Status.ps1`: mostra HarbourRoot, Zig, win-make e saidas.
+- `scripts\Bootstrap-Tools.ps1`: baixa ferramentas locais como Zig e MinGW-w64.
+- `scripts\Show-Status.ps1`: mostra HarbourRoot, toolchains, win-make e saidas.
 - `scripts\Test-HarbourInstall.ps1`: compila `samples\hello.prg` com um build instalado.
 - `out\`: instalacoes geradas por perfil.
 - `logs\`: logs completos de build.
@@ -120,9 +120,18 @@ O perfil `msvc64` tenta carregar automaticamente o ambiente do Visual Studio
 Build Tools via `vswhere`. Se preferir, abra antes um "Developer PowerShell"
 ou chame `vcvarsall.bat` e use `-NoVsDevShell`.
 
-O perfil `mingw64` exige um GCC MinGW-w64/MSYS2 no `PATH`. Se o primeiro
-`gcc.exe` encontrado for o do Cygwin, o build falha cedo com uma mensagem
-explicita; para esse toolchain use os wrappers `cygwin`.
+O perfil `mingw64` exige um GCC MinGW-w64/MSYS2 valido. Se o primeiro
+`gcc.exe` encontrado for o do Cygwin, o build tenta usar `tools\mingw64` ou
+baixar um MinGW-w64 portatil antes de falhar. Para forcar um toolchain
+especifico, use `-MinGwPath`:
+
+```powershell
+.\build-full-mingw64.ps1 -MinGwPath C:\Tools\xpack-mingw-w64-gcc\bin -IgnoreDependency qt -Clean
+```
+
+O padrao para toolchains portateis e: caminho explicito, `tools\<compiler>`,
+`PATH` valido e bootstrap automatico. Use `-SkipToolBootstrap` para impedir
+download.
 
 ## Build Cygwin, MSYS, WSL e Docker
 
@@ -238,8 +247,14 @@ confirmar um build Linux limpo e reproduzivel.
 
 ## Build com Zig
 
-Se o Zig ja estiver no PATH, nada precisa ser baixado. Para instalar localmente
-em `tools\zig`:
+Se o Zig ja estiver no PATH ou em `tools\zig`, nada precisa ser baixado. Para
+usar um caminho especifico, informe `-ZigPath`:
+
+```powershell
+.\build-zig.ps1 -ZigPath C:\Tools\zig\zig.exe -Clean
+```
+
+Para instalar localmente em `tools\zig`:
 
 ```powershell
 .\scripts\Bootstrap-Tools.ps1 -Tool Zig

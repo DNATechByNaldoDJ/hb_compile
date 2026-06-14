@@ -12,7 +12,7 @@
       "env": {}
     },
     "mingw64": {
-      "description": "Build Windows x64 usando MinGW-w64 ja disponivel no PATH.",
+      "description": "Build Windows x64 usando MinGW-w64 via -MinGwPath, tools\\mingw64 ou PATH.",
       "installSubdir": "mingw64",
       "env": {
         "HB_PLATFORM": "win",

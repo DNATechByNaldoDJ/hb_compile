@@ -59,7 +59,7 @@ Exemplo:
 | Perfil | Wrapper normal | Wrapper full | Ambiente |
 | --- | --- | --- | --- |
 | `auto` | `build-standard.ps1` | `build-full-standard.ps1` | `win-make.exe` com autodeteccao do Harbour |
-| `mingw64` | `build-mingw64.ps1` | `build-full-mingw64.ps1` | MinGW-w64/MSYS2 no `PATH` |
+| `mingw64` | `build-mingw64.ps1` | `build-full-mingw64.ps1` | MinGW-w64 por `-MinGwPath`, `tools\mingw64` ou `PATH` |
 | `msvc64` | `build-msvc64.ps1` | `build-full-msvc64.ps1` | Visual Studio C++ Build Tools |
 | `zig` | `build-zig.ps1` | `build-full-zig.ps1` | Zig |
 | `cygwin` | `build-cygwin.ps1` | `build-full-cygwin.ps1` | Cygwin `bash`, `make` e `gcc` |
@@ -109,6 +109,45 @@ O parametro `-IgnoreDependency` tambem aceita lista:
 Quando uma dependencia ignorada tem contribs diretamente associados, o wrapper
 tambem pode exclui-los do build. Hoje `qt` adiciona `HB_BUILD_CONTRIBS=no gtqtc`
 para impedir que o plugin Qt procure `moc`.
+
+## Padrao de toolchains
+
+Toolchains portateis seguem sempre a mesma prioridade:
+
+1. Caminho informado por parametro, como `-ZigPath` ou `-MinGwPath`.
+2. Ferramenta ja baixada em `tools\<compiler>`.
+3. Ferramenta ja disponivel no `PATH`.
+4. Bootstrap automatico por `scripts\Bootstrap-Tools.ps1`, salvo quando
+   `-SkipToolBootstrap` for usado.
+
+Exemplos:
+
+```powershell
+.\build-zig.ps1 -ZigPath C:\Tools\zig\zig.exe -Clean
+.\build-full-mingw64.ps1 -MinGwPath C:\Tools\xpack-mingw-w64-gcc\bin -IgnoreDependency qt -Clean
+```
+
+Se nenhum caminho for informado, os builds procuram primeiro em:
+
+```text
+tools\zig\...\zig.exe
+tools\mingw64\...\bin\gcc.exe
+```
+
+Se ainda nao houver ferramenta valida, o executor baixa automaticamente:
+
+```powershell
+.\scripts\Bootstrap-Tools.ps1 -Tool Zig
+.\scripts\Bootstrap-Tools.ps1 -Tool MinGW64
+.\scripts\Bootstrap-Tools.ps1 -Tool All
+```
+
+Use `-SkipToolBootstrap` para validar apenas o ambiente atual, sem download.
+
+MSVC, Cygwin, MSYS, WSL e Docker nao seguem esse modelo de zip portatil:
+MSVC vem do Visual Studio Build Tools; Cygwin/MSYS usam `-CygwinBash` e
+`-MsysBash`; WSL usa a distro Linux; Docker usa a imagem configurada pelo
+Dockerfile.
 
 ## Dependencias de sistema no full
 
@@ -297,15 +336,33 @@ separados dos artefatos Cygwin.
 O perfil `mingw64` e diferente do perfil `msys`: ele usa o build Windows do
 Harbour com `HB_PLATFORM=win` e `HB_COMPILER=mingw64`.
 
-Use este perfil quando o `gcc.exe` no `PATH` vier do ambiente MinGW-w64/MSYS2:
+Use este perfil quando tiver um GCC MinGW-w64 valido por `-MinGwPath`,
+`tools\mingw64` ou `PATH`:
 
 ```powershell
 .\build-mingw64.ps1 -Clean
 .\build-full-mingw64.ps1 -IgnoreDependency qt -Clean
 ```
 
-Se o primeiro `gcc.exe` no `PATH` for do Cygwin, o wrapper falha cedo para
-evitar misturar toolchains.
+Para usar uma instalacao local especifica:
+
+```powershell
+.\build-full-mingw64.ps1 -MinGwPath F:\MinGW64\xpack-mingw-w64-gcc\bin -IgnoreDependency qt -Clean
+```
+
+`-MinGwPath` pode apontar para a pasta raiz do toolchain ou para a pasta
+`bin`. Ela precisa conter um `gcc.exe` funcional cujo `gcc -dumpmachine` indique
+MinGW-w64. A pasta de fontes `mingw-w64-v6.0.1`, sozinha, nao e um compilador
+pronto.
+
+Se nada for informado e `tools\mingw64` ainda nao existir, o wrapper baixa um
+toolchain portatil xPack MinGW-w64 GCC para essa pasta. Se o primeiro
+`gcc.exe` no `PATH` for do Cygwin e o bootstrap estiver desativado, o wrapper
+falha cedo para evitar misturar toolchains.
+
+O xPack usa executaveis prefixados, como `x86_64-w64-mingw32-gcc.exe`. O
+wrapper detecta esse layout e passa `HB_CCPATH`/`HB_CCPREFIX` ao Harbour, entao
+nao e necessario criar `gcc.exe` manualmente.
 
 ## WSL e Docker
 
