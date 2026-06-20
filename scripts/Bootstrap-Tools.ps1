@@ -1,8 +1,10 @@
 [CmdletBinding()]
 param(
-   [ValidateSet('All', 'Zig', 'MinGW64')]
+   [ValidateSet('All', 'Zig', 'MinGW64', 'Cygwin', 'MSYS')]
    [string[]] $Tool = @('Zig'),
    [string] $Version = 'latest',
+   [string] $CygwinSetup = '',
+   [string] $CygwinMirror = 'https://mirrors.kernel.org/sourceware/cygwin/',
    [switch] $Force
 )
 
@@ -46,6 +48,118 @@ function Get-ZigPlatformKey {
    }
 
    return 'x86_64-windows'
+}
+
+function Format-CommandArgument {
+   param([string] $Value)
+   if ($Value -match '[\s"]') {
+      return '"' + ($Value -replace '"', '\"') + '"'
+   }
+   return $Value
+}
+
+function Invoke-BashProbe {
+   param(
+      [Parameter(Mandatory = $true)][string] $Path,
+      [Parameter(Mandatory = $true)][string] $Script
+   )
+
+   $process = $null
+   try {
+      $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+      $startInfo.FileName = $Path
+      $startInfo.Arguments = "-lc $(Format-CommandArgument $Script)"
+      $startInfo.UseShellExecute = $false
+      $startInfo.CreateNoWindow = $true
+      $startInfo.RedirectStandardOutput = $true
+      $startInfo.RedirectStandardError = $true
+      $process = New-Object System.Diagnostics.Process
+      $process.StartInfo = $startInfo
+      [void] $process.Start()
+      if (-not $process.WaitForExit(5000)) {
+         $process.Kill()
+         return [pscustomobject]@{ ExitCode = -1; StdOut = ''; StdErr = 'timeout' }
+      }
+      return [pscustomobject]@{
+         ExitCode = $process.ExitCode
+         StdOut = $process.StandardOutput.ReadToEnd()
+         StdErr = $process.StandardError.ReadToEnd()
+      }
+   }
+   catch {
+      return [pscustomobject]@{ ExitCode = -1; StdOut = ''; StdErr = $_.Exception.Message }
+   }
+   finally {
+      if ($process) {
+         $process.Dispose()
+      }
+   }
+}
+
+function Test-BashEnvironment {
+   param(
+      [Parameter(Mandatory = $true)][string] $Path,
+      [Parameter(Mandatory = $true)][ValidateSet('Cygwin', 'MSYS')][string] $Environment
+   )
+
+   try {
+      if (-not (Test-Path -LiteralPath $Path -ErrorAction Stop)) {
+         return $false
+      }
+   }
+   catch {
+      return $false
+   }
+
+   $probe = Invoke-BashProbe -Path $Path -Script 'uname -s'
+   if ($probe.ExitCode -ne 0) {
+      return $false
+   }
+
+   if ($Environment -eq 'Cygwin') {
+      return $probe.StdOut -match 'CYGWIN'
+   }
+
+   return $probe.StdOut -match 'MSYS|MINGW'
+}
+
+function Find-BashEnvironment {
+   param(
+      [Parameter(Mandatory = $true)][string] $Root,
+      [Parameter(Mandatory = $true)][ValidateSet('Cygwin', 'MSYS')][string] $Environment
+   )
+
+   try {
+      if (-not (Test-Path -LiteralPath $Root -ErrorAction Stop)) {
+         return $null
+      }
+   }
+   catch {
+      return $null
+   }
+
+   $candidates = @(
+      (Join-Path $Root 'bin\bash.exe'),
+      (Join-Path $Root 'usr\bin\bash.exe'),
+      (Join-Path $Root 'msys64\usr\bin\bash.exe')
+   )
+   foreach ($candidate in $candidates) {
+      if (Test-BashEnvironment -Path $candidate -Environment $Environment) {
+         return (Get-Item -LiteralPath $candidate)
+      }
+   }
+
+   return Get-ChildItem -LiteralPath $Root -Filter 'bash.exe' -Recurse -ErrorAction SilentlyContinue |
+      Where-Object { Test-BashEnvironment -Path $_.FullName -Environment $Environment } |
+      Sort-Object -Property FullName |
+      Select-Object -First 1
+}
+
+function Test-BashBuildTools {
+   param([Parameter(Mandatory = $true)][string] $BashPath)
+
+   $probe = Invoke-BashProbe -Path $BashPath -Script 'command -v make >/dev/null && command -v gcc >/dev/null && command -v git >/dev/null'
+   return $probe.ExitCode -eq 0
 }
 
 function Test-MinGwGcc {
@@ -260,14 +374,150 @@ function Install-MinGw64 {
    Write-Host "MinGW-w64 pronto: $($gccExe.FullName) ($dump)"
 }
 
+function Install-Cygwin {
+   param(
+      [Parameter(Mandatory = $true)][string] $ToolsRoot,
+      [string] $SetupPath = '',
+      [Parameter(Mandatory = $true)][string] $Mirror,
+      [switch] $ForceInstall
+   )
+
+   $cygwinRoot = Join-Path $ToolsRoot 'cygwin'
+   $localBash = Find-BashEnvironment -Root $cygwinRoot -Environment Cygwin
+   if ($localBash -and -not $ForceInstall -and (Test-BashBuildTools -BashPath $localBash.FullName)) {
+      Write-Host "Cygwin local ja existe: $($localBash.FullName)"
+      return
+   }
+
+   $downloads = Join-Path $ToolsRoot 'downloads'
+   New-Item -ItemType Directory -Force -Path $downloads | Out-Null
+   if ([string]::IsNullOrWhiteSpace($SetupPath)) {
+      $setupExe = Join-Path $downloads 'setup-x86_64.exe'
+      if ($ForceInstall -or -not (Test-Path -LiteralPath $setupExe)) {
+         Write-Host 'Baixando instalador oficial do Cygwin...'
+         Invoke-WebRequest -Uri 'https://cygwin.com/setup-x86_64.exe' -OutFile $setupExe
+      }
+   }
+   else {
+      $setupExe = Resolve-ProjectPath $SetupPath
+   }
+
+   if (-not (Test-Path -LiteralPath $setupExe)) {
+      throw "setup-x86_64.exe nao encontrado: $setupExe"
+   }
+
+   New-Item -ItemType Directory -Force -Path $cygwinRoot | Out-Null
+   $packages = 'gcc-core,make,binutils,git,pkg-config'
+   $setupArgs = @(
+      '--quiet-mode',
+      '--wait',
+      '--no-admin',
+      '--no-desktop',
+      '--no-startmenu',
+      '--no-shortcuts',
+      '--root', $cygwinRoot,
+      '--site', $Mirror,
+      '--local-package-dir', $downloads,
+      '--packages', $packages
+   )
+
+   Write-Host "Preparando Cygwin local em: $cygwinRoot"
+   $setupProcess = Start-Process `
+      -FilePath $setupExe `
+      -ArgumentList $setupArgs `
+      -Wait `
+      -PassThru
+   if ($setupProcess.ExitCode -ne 0) {
+      throw "Instalacao do Cygwin falhou com codigo $($setupProcess.ExitCode)."
+   }
+
+   $localBash = Find-BashEnvironment -Root $cygwinRoot -Environment Cygwin
+   if (-not $localBash -or -not (Test-BashBuildTools -BashPath $localBash.FullName)) {
+      throw "Cygwin foi instalado, mas bash/make/gcc/git nao foram validados em: $cygwinRoot"
+   }
+
+   Write-Host "Cygwin pronto: $($localBash.FullName)"
+}
+
+function Install-Msys {
+   param(
+      [Parameter(Mandatory = $true)][string] $ToolsRoot,
+      [Parameter(Mandatory = $true)][string] $RequestedVersion,
+      [switch] $ForceInstall
+   )
+
+   $msysRoot = Join-Path $ToolsRoot 'msys'
+   $localBash = Find-BashEnvironment -Root $msysRoot -Environment MSYS
+   if ($localBash -and -not $ForceInstall -and (Test-BashBuildTools -BashPath $localBash.FullName)) {
+      Write-Host "MSYS2 local ja existe: $($localBash.FullName)"
+      return
+   }
+
+   if ($ForceInstall) {
+      Remove-SafeDirectory -Path $msysRoot -Root $ToolsRoot
+   }
+
+   if (-not $localBash) {
+      $headers = @{ 'User-Agent' = 'hb_compile-bootstrap' }
+      if ($RequestedVersion -eq 'latest') {
+         Write-Host 'Consultando release mais recente do instalador MSYS2...'
+         $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/msys2/msys2-installer/releases/latest' -Headers $headers
+      }
+      else {
+         Write-Host "Consultando release do instalador MSYS2: $RequestedVersion"
+         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/msys2/msys2-installer/releases/tags/$RequestedVersion" -Headers $headers
+      }
+
+      $asset = @($release.assets) |
+         Where-Object { $_.name -match '^msys2-base-x86_64-.*\.sfx\.exe$' } |
+         Sort-Object -Property name -Descending |
+         Select-Object -First 1
+      if (-not $asset) {
+         throw "Pacote base x86_64 do MSYS2 nao foi encontrado na release '$($release.tag_name)'."
+      }
+
+      $downloads = Join-Path $ToolsRoot 'downloads'
+      New-Item -ItemType Directory -Force -Path $downloads | Out-Null
+      $archive = Join-Path $downloads ([string] $asset.name)
+      Write-Host "Baixando MSYS2 $($release.tag_name): $($asset.browser_download_url)"
+      Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archive
+
+      New-Item -ItemType Directory -Force -Path $msysRoot | Out-Null
+      Write-Host "Extraindo MSYS2 para: $msysRoot"
+      & $archive '-y' "-o$msysRoot"
+      if ($LASTEXITCODE -ne 0) {
+         throw "Extracao do MSYS2 falhou com codigo $LASTEXITCODE."
+      }
+
+      $localBash = Find-BashEnvironment -Root $msysRoot -Environment MSYS
+      if (-not $localBash) {
+         throw "bash.exe do MSYS2 nao foi encontrado apos extracao em: $msysRoot"
+      }
+   }
+
+   Write-Host 'Instalando ferramentas base no MSYS2 local...'
+   & $localBash.FullName -lc 'pacman -Sy --needed --noconfirm base-devel make binutils gcc git pkgconf'
+   if ($LASTEXITCODE -ne 0) {
+      throw "Instalacao de pacotes MSYS2 falhou com codigo $LASTEXITCODE."
+   }
+
+   if (-not (Test-BashBuildTools -BashPath $localBash.FullName)) {
+      throw "MSYS2 foi instalado, mas make/gcc/git nao foram validados em: $msysRoot"
+   }
+
+   Write-Host "MSYS2 pronto: $($localBash.FullName)"
+}
+
 $ToolsRoot = Resolve-ProjectPath $Config.toolsRoot
 New-Item -ItemType Directory -Force -Path $ToolsRoot | Out-Null
 
-$toolsToInstall = if ($Tool -contains 'All') { @('Zig', 'MinGW64') } else { $Tool }
+$toolsToInstall = if ($Tool -contains 'All') { @('Zig', 'MinGW64', 'Cygwin', 'MSYS') } else { $Tool }
 
 foreach ($toolName in $toolsToInstall) {
    switch ($toolName) {
       'Zig' { Install-Zig -ToolsRoot $ToolsRoot -RequestedVersion $Version -ForceInstall:$Force }
       'MinGW64' { Install-MinGw64 -ToolsRoot $ToolsRoot -RequestedVersion $Version -ForceInstall:$Force }
+      'Cygwin' { Install-Cygwin -ToolsRoot $ToolsRoot -SetupPath $CygwinSetup -Mirror $CygwinMirror -ForceInstall:$Force }
+      'MSYS' { Install-Msys -ToolsRoot $ToolsRoot -RequestedVersion $Version -ForceInstall:$Force }
    }
 }

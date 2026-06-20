@@ -5,6 +5,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
+$needsFix = $false
+$fixApplied = $false
 
 Write-Host "=== Verificando dependências do Qt ===" -ForegroundColor Cyan
 
@@ -17,18 +19,19 @@ $sdkVersion = $null
 try {
     if (Test-Path $sdkPath) {
         $versions = Get-ChildItem $sdkPath -ErrorAction SilentlyContinue |
-            Where-Object { $_.PSChildName -match "^\d+\.\d+" } |
-            ForEach-Object { $_.PSChildName } |
-            Sort-Object -Descending
+            Where-Object { $_.PSChildName -match '^\d+(?:\.\d+){1,3}$' } |
+            Sort-Object -Property { [version] $_.PSChildName } -Descending |
+            ForEach-Object { $_.PSChildName }
 
         if ($versions) {
             $sdkVersion = $versions[0]
             Write-Host "  ✓ Windows SDK encontrado: versão $sdkVersion" -ForegroundColor Green
 
             # Windows 11 requer SDK 22621+ para DWM rounded corners
-            $majorMinor = $sdkVersion -split '\.' | Select-Object -First 2
-            if ([int]$majorMinor[0] -lt 22 -or ([int]$majorMinor[0] -eq 22 -and [int]$majorMinor[1] -lt 621)) {
-                Write-Host "  ⚠ Aviso: SDK < 22.621 pode não ter suporte para DWM_WINDOW_CORNER_PREFERENCE" -ForegroundColor Yellow
+            $parsedSdkVersion = [version] $sdkVersion
+            if ($parsedSdkVersion.Major -lt 10 -or
+                ($parsedSdkVersion.Major -eq 10 -and $parsedSdkVersion.Build -lt 22621)) {
+                Write-Host "  ⚠ Aviso: SDK build < 22621 pode não ter suporte para DWM_WINDOW_CORNER_PREFERENCE" -ForegroundColor Yellow
                 $needsFix = $true
             }
         }
@@ -88,60 +91,56 @@ else {
     Write-Host "  ✗ vcpkg.exe não encontrado" -ForegroundColor Red
 }
 
-# 4. Solução: Criar overlay para desabilitar DWM se necessário
-if ($needsFix -or $AutoFix) {
-    Write-Host "`n[4] Aplicando correção..." -ForegroundColor Yellow
+# 4. Solução: configurar o triplet que o resolvedor passa ao vcpkg
+Write-Host "`n[4] Verificando correção DWM..." -ForegroundColor Yellow
+$tripletDir = Join-Path $vcpkgRoot 'triplets\custom'
+$tripletFile = Join-Path $tripletDir 'x64-windows-no-dwm.cmake'
+$tripletReady = $false
+if (Test-Path -LiteralPath $tripletFile) {
+    $tripletContent = Get-Content -LiteralPath $tripletFile -Raw
+    $tripletReady = $tripletContent -match '(?m)^\s*set\(VCPKG_CMAKE_CONFIGURE_OPTIONS.*FEATURE_system_dwm_api=OFF'
+}
 
-    $overlayDir = Join-Path $vcpkgRoot "overlays\qtbase"
-
-    if (-not (Test-Path $overlayDir)) {
-        New-Item -ItemType Directory -Path $overlayDir -Force | Out-Null
-        Write-Host "  ✓ Diretório de overlay criado: $overlayDir" -ForegroundColor Green
-    }
-
-    # Copia portfile.cmake para overlay e desabilita a feature
-    $sourcePortfile = Join-Path $vcpkgRoot "ports\qtbase\portfile.cmake"
-    $overlayPortfile = Join-Path $overlayDir "portfile.cmake"
-
-    if (Test-Path $sourcePortfile) {
-        Copy-Item $sourcePortfile $overlayPortfile -Force
-        Write-Host "  ✓ portfile.cmake copiado para overlay" -ForegroundColor Green
-
-        # Modifica para desabilitar a feature problemática
-        $content = Get-Content $overlayPortfile -Raw
-
-        # Verifica se já tem a configuração
-        if ($content -notmatch "FEATURE_system_dwm_api") {
-            # Encontra a seção qt_cmake_build_args e adiciona a flag
-            if ($content -match 'set\(qt_cmake_build_args') {
-                $newContent = $content -replace `
-                    '(set\(qt_cmake_build_args[^)]*)', `
-                    '$1 -DFEATURE_system_dwm_api=OFF'
-
-                Set-Content $overlayPortfile -Value $newContent
-                Write-Host "  ✓ Feature FEATURE_system_dwm_api desabilitada" -ForegroundColor Green
-            }
-        }
-    }
-
-    # Cria vcpkg.json com overlay config
-    $configFile = Join-Path $overlayDir "vcpkg.json"
-    if (-not (Test-Path $configFile)) {
-        @{
-            name = "qtbase"
-            version = "6.11.1"
-        } | ConvertTo-Json | Set-Content $configFile
-        Write-Host "  ✓ vcpkg.json criado para overlay" -ForegroundColor Green
-    }
+if ($AutoFix) {
+    New-Item -ItemType Directory -Path $tripletDir -Force | Out-Null
+    @'
+# Qt sem a API DWM que requer Windows SDK recente.
+include(${CMAKE_CURRENT_LIST_DIR}/../x64-windows.cmake)
+set(VCPKG_CMAKE_CONFIGURE_OPTIONS "-DFEATURE_system_dwm_api=OFF")
+'@ | Set-Content -LiteralPath $tripletFile -Encoding ASCII
+    $tripletReady = $true
+    $fixApplied = $true
+    Write-Host "  ✓ Triplet criado/atualizado: $tripletFile" -ForegroundColor Green
+}
+elseif ($tripletReady) {
+    Write-Host "  ✓ Triplet DWM já está configurado" -ForegroundColor Green
+}
+elseif ($needsFix) {
+    Write-Host "  ⚠ Correção necessária; execute novamente com -AutoFix" -ForegroundColor Yellow
+}
+else {
+    Write-Host "  ✓ SDK atual não requer a correção" -ForegroundColor Green
 }
 
 Write-Host "`n[5] Resumo" -ForegroundColor Cyan
+$solutionStatus = if ($fixApplied) {
+    'Triplet DWM criado/atualizado'
+}
+elseif ($tripletReady) {
+    'Triplet DWM já configurado'
+}
+elseif ($needsFix) {
+    'Pendente; execute com -AutoFix'
+}
+else {
+    'Não necessária para o SDK detectado'
+}
 Write-Host @"
   Windows SDK: $(if ($sdkVersion) { $sdkVersion } else { "Não detectado" })
-  Solução: Overlay para desabilitar DWM criado/verificado
+  Solução: $solutionStatus
 
-  Para compilar com segurança, execute:
-    .\build-full-zig.ps1 -Clean
+  Build recomendado após uma correção:
+    .\build-full-msvc64.ps1 -Clean
 "@ -ForegroundColor Gray
 
 Write-Host "`n=== Verificação concluída ===" -ForegroundColor Cyan

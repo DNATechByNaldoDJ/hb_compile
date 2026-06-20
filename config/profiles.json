@@ -46,7 +46,7 @@
         "HB_BUILD_DYN": "no",
         "HB_BUILD_SHARED": "no",
         "HB_BUILD_CONTRIB_DYN": "no",
-        "HB_USER_CFLAGS": "-march=x86-64 -mtune=generic"
+        "HB_USER_CFLAGS": "-march=x86-64 -mtune=generic -DMYSQL_PORT=3306"
       }
     },
     "msys": {

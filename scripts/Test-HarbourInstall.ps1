@@ -2,7 +2,8 @@
 param(
    [Alias('Profile')]
    [string] $BuildProfile = 'zig',
-   [string] $InstallRoot
+   [string] $InstallRoot,
+   [switch] $CompileOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -202,8 +203,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if (Test-Path -LiteralPath $outExe) {
-   Write-Host "Executando: $outExe"
-   & $outExe
+   if ($CompileOnly) {
+      Write-Host "Sample compilado: $outExe"
+   }
+   else {
+      Write-Host "Executando: $outExe"
+      & $outExe
+   }
 }
 else {
    Write-Host 'Sample compilado, mas nao foi gerado hello.exe; possivel alvo nao-Windows.'

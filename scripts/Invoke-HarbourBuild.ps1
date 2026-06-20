@@ -35,7 +35,9 @@ param(
    [string] $MinGwPath = '',
    [switch] $SkipToolBootstrap,
    [string] $CygwinSetup = '',
+   [Alias('CygwinPath')]
    [string] $CygwinBash = '',
+   [Alias('MsysPath')]
    [string] $MsysBash = '',
    [string] $WslDistro = '',
    [string] $WslUser = '',
@@ -673,19 +675,17 @@ function Get-SystemDependencyPlan {
             'gcc-core', 'make', 'binutils', 'git', 'pkg-config',
             'zlib-devel', 'libpcre-devel', 'libncurses-devel',
             'libslang-devel', 'libX11-devel', 'libsqlite3-devel',
-            'libbz2-devel', 'libexpat-devel', 'unixODBC-devel',
-            'libcups-devel'
+            'libbz2-devel', 'libexpat-devel', 'libiodbc-devel'
          )
 
          $map = @{
-            openssl = @('openssl-devel')
+            openssl = @('libssl-devel')
             curl = @('libcurl-devel')
             mysql = @('libmariadb-devel')
             pgsql = @('libpq-devel')
             cairo = @('libcairo-devel')
-            freeimage = @('libfreeimage-devel')
             gd = @('libgd-devel')
-            libmagic = @('libmagic-devel')
+            libmagic = @('file-devel')
             ghostscript = @('ghostscript', 'libgs-devel')
          }
       }
@@ -815,17 +815,39 @@ function Invoke-SystemDependencyInstall {
       'cygwin' {
          $setup = Resolve-CygwinSetup -PreferredPath $CygwinSetupPath -BashPath $RunnerState.CygwinBash
          $cygwinRoot = Split-Path -Parent (Split-Path -Parent ([System.IO.Path]::GetFullPath($RunnerState.CygwinBash)))
-         $arguments = @('--quiet-mode', '--root', $cygwinRoot, '--packages', ($Packages -join ','))
+         $arguments = @('--quiet-mode', '--wait', '--root', $cygwinRoot, '--packages', ($Packages -join ','))
          if ($DryRun) {
             Write-Host "DryRun: $setup $($arguments -join ' ')"
             return
          }
 
          Write-Host "Instalando dependencias Cygwin: $($Packages -join ', ')"
-         & $setup @arguments
-         if ($LASTEXITCODE -ne 0) {
-            throw "Instalacao de dependencias Cygwin falhou com codigo $LASTEXITCODE."
+         $setupProcess = Start-Process `
+            -FilePath $setup `
+            -ArgumentList $arguments `
+            -Wait `
+            -PassThru
+         if ($setupProcess.ExitCode -ne 0) {
+            throw "Instalacao de dependencias Cygwin falhou com codigo $($setupProcess.ExitCode)."
          }
+
+         $installedDb = Join-Path $cygwinRoot 'etc\setup\installed.db'
+         if (-not (Test-Path -LiteralPath $installedDb)) {
+            throw "A instalacao do Cygwin terminou, mas o banco de pacotes nao foi encontrado: $installedDb"
+         }
+
+         $installedPackages = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+         foreach ($line in (Get-Content -LiteralPath $installedDb)) {
+            if ($line -match '^(\S+)\s') {
+               [void] $installedPackages.Add($Matches[1])
+            }
+         }
+         $missingPackages = @($Packages | Where-Object { -not $installedPackages.Contains($_) })
+         if ($missingPackages.Count -gt 0) {
+            throw "A instalacao do Cygwin terminou sem os pacotes esperados: $($missingPackages -join ', ')."
+         }
+
+         Write-Host 'Instalacao de dependencias Cygwin concluida e validada.'
       }
       'msys' {
          $script = "pacman -S --needed --noconfirm $(($Packages | ForEach-Object { Format-ShArgument ([string] $_) }) -join ' ')"
@@ -843,10 +865,10 @@ function Invoke-SystemDependencyInstall {
       'wsl' {
          $packageList = ($Packages | ForEach-Object { Format-ShArgument ([string] $_) }) -join ' '
          $script = "if [ `$(id -u) -eq 0 ]; then SUDO=; else SUDO=sudo; fi; `$SUDO apt-get update && `$SUDO apt-get install -y --no-install-recommends $packageList"
-         $arguments = @($WslArguments) + @('bash', '-lc', $script)
+         $arguments = @($WslArguments) + @('bash', '-c', $script)
          if ($DryRun) {
             $prefix = if ($WslArguments.Count -gt 0) { "wsl.exe $($WslArguments -join ' ')" } else { 'wsl.exe' }
-            Write-Host "DryRun: $prefix bash -lc $(Format-ShArgument $script)"
+            Write-Host "DryRun: $prefix bash -c $(Format-ShArgument $script)"
             return
          }
 
@@ -865,11 +887,10 @@ function Invoke-SystemDependencyInstall {
 function Test-CygwinBash {
    param([Parameter(Mandatory = $true)][string] $Path)
 
-   if (-not (Test-Path -LiteralPath $Path)) {
-      return $false
-   }
-
    try {
+      if (-not (Test-Path -LiteralPath $Path -ErrorAction Stop)) {
+         return $false
+      }
       $probe = Invoke-BashProbe -Path $Path -Script 'uname -s'
       return ($probe.ExitCode -eq 0 -and $probe.StdOut -match 'CYGWIN')
    }
@@ -878,16 +899,86 @@ function Test-CygwinBash {
    }
 }
 
-function Resolve-CygwinBash {
-   param([string] $PreferredPath)
+function Find-EnvironmentBash {
+   param(
+      [Parameter(Mandatory = $true)][string] $Root,
+      [Parameter(Mandatory = $true)][ValidateSet('cygwin', 'msys')][string] $Environment
+   )
 
-   $candidates = New-Object System.Collections.Generic.List[string]
-   if (-not [string]::IsNullOrWhiteSpace($PreferredPath)) {
-      $candidates.Add($PreferredPath)
+   if (-not (Test-Path -LiteralPath $Root)) {
+      return $null
    }
 
-   foreach ($path in @('C:\cygwin64\bin\bash.exe', 'C:\cygwin\bin\bash.exe')) {
-      $candidates.Add($path)
+   if (Test-Path -LiteralPath $Root -PathType Leaf) {
+      $valid = if ($Environment -eq 'cygwin') {
+         Test-CygwinBash -Path $Root
+      }
+      else {
+         Test-MsysBash -Path $Root
+      }
+      if ($valid) {
+         return (Get-Item -LiteralPath $Root)
+      }
+      return $null
+   }
+
+   $candidates = @(
+      (Join-Path $Root 'bin\bash.exe'),
+      (Join-Path $Root 'usr\bin\bash.exe'),
+      (Join-Path $Root 'msys64\usr\bin\bash.exe')
+   )
+   foreach ($candidate in $candidates) {
+      $valid = if ($Environment -eq 'cygwin') {
+         Test-CygwinBash -Path $candidate
+      }
+      else {
+         Test-MsysBash -Path $candidate
+      }
+      if ($valid) {
+         return (Get-Item -LiteralPath $candidate)
+      }
+   }
+
+   return Get-ChildItem -LiteralPath $Root -Filter 'bash.exe' -Recurse -ErrorAction SilentlyContinue |
+      Where-Object {
+         if ($Environment -eq 'cygwin') {
+            Test-CygwinBash -Path $_.FullName
+         }
+         else {
+            Test-MsysBash -Path $_.FullName
+         }
+      } |
+      Sort-Object -Property FullName |
+      Select-Object -First 1
+}
+
+function Resolve-CygwinBash {
+   param(
+      [string] $PreferredPath,
+      [Parameter(Mandatory = $true)][string] $ToolsRoot,
+      [string] $SetupPath = '',
+      [switch] $SkipBootstrap,
+      [switch] $DryRun
+   )
+
+   if (-not [string]::IsNullOrWhiteSpace($PreferredPath)) {
+      $explicit = Find-EnvironmentBash -Root (Resolve-ProjectPath $PreferredPath) -Environment cygwin
+      if ($explicit) {
+         return $explicit.FullName
+      }
+      throw "Cygwin nao encontrado em '$PreferredPath'. Informe a raiz ou o caminho de bin\bash.exe."
+   }
+
+   $localRoot = Join-Path $ToolsRoot 'cygwin'
+   $local = Find-EnvironmentBash -Root $localRoot -Environment cygwin
+   if ($local) {
+      return $local.FullName
+   }
+
+   $candidates = New-Object System.Collections.Generic.List[string]
+   foreach ($drive in @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue)) {
+      $candidates.Add((Join-Path $drive.Root 'cygwin64\bin\bash.exe'))
+      $candidates.Add((Join-Path $drive.Root 'cygwin\bin\bash.exe'))
    }
 
    $pathBash = Get-Command 'bash.exe' -ErrorAction SilentlyContinue
@@ -901,17 +992,38 @@ function Resolve-CygwinBash {
       }
    }
 
-   throw 'bash.exe do Cygwin nao foi encontrado. Instale Cygwin ou informe -CygwinBash C:\cygwin64\bin\bash.exe.'
+   if (-not $SkipBootstrap) {
+      $bootstrap = Join-Path $ProjectRoot 'scripts\Bootstrap-Tools.ps1'
+      if ($DryRun) {
+         Write-Host 'DryRun: .\scripts\Bootstrap-Tools.ps1 -Tool Cygwin'
+         return (Join-Path $localRoot 'bin\bash.exe')
+      }
+
+      $bootstrapArgs = @{ Tool = 'Cygwin' }
+      if (-not [string]::IsNullOrWhiteSpace($SetupPath)) {
+         $bootstrapArgs['CygwinSetup'] = $SetupPath
+      }
+      & $bootstrap @bootstrapArgs
+      if (-not $?) {
+         throw 'Falha ao preparar Cygwin local.'
+      }
+
+      $local = Find-EnvironmentBash -Root $localRoot -Environment cygwin
+      if ($local) {
+         return $local.FullName
+      }
+   }
+
+   throw 'bash.exe do Cygwin nao foi encontrado. Use -CygwinPath, instale em tools\cygwin ou permita o bootstrap automatico.'
 }
 
 function Test-MsysBash {
    param([Parameter(Mandatory = $true)][string] $Path)
 
-   if (-not (Test-Path -LiteralPath $Path)) {
-      return $false
-   }
-
    try {
+      if (-not (Test-Path -LiteralPath $Path -ErrorAction Stop)) {
+         return $false
+      }
       $probe = Invoke-BashProbe -Path $Path -Script 'uname -s'
       return ($probe.ExitCode -eq 0 -and $probe.StdOut -match 'MSYS|MINGW')
    }
@@ -921,19 +1033,32 @@ function Test-MsysBash {
 }
 
 function Resolve-MsysBash {
-   param([string] $PreferredPath)
+   param(
+      [string] $PreferredPath,
+      [Parameter(Mandatory = $true)][string] $ToolsRoot,
+      [switch] $SkipBootstrap,
+      [switch] $DryRun
+   )
 
-   $candidates = New-Object System.Collections.Generic.List[string]
    if (-not [string]::IsNullOrWhiteSpace($PreferredPath)) {
-      $candidates.Add($PreferredPath)
+      $explicit = Find-EnvironmentBash -Root (Resolve-ProjectPath $PreferredPath) -Environment msys
+      if ($explicit) {
+         return $explicit.FullName
+      }
+      throw "MSYS2 nao encontrado em '$PreferredPath'. Informe a raiz ou o caminho de usr\bin\bash.exe."
    }
 
-   foreach ($path in @(
-      'C:\msys64\usr\bin\bash.exe',
-      'C:\msys32\usr\bin\bash.exe',
-      'C:\tools\msys64\usr\bin\bash.exe'
-   )) {
-      $candidates.Add($path)
+   $localRoot = Join-Path $ToolsRoot 'msys'
+   $local = Find-EnvironmentBash -Root $localRoot -Environment msys
+   if ($local) {
+      return $local.FullName
+   }
+
+   $candidates = New-Object System.Collections.Generic.List[string]
+   foreach ($drive in @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue)) {
+      $candidates.Add((Join-Path $drive.Root 'msys64\usr\bin\bash.exe'))
+      $candidates.Add((Join-Path $drive.Root 'msys32\usr\bin\bash.exe'))
+      $candidates.Add((Join-Path $drive.Root 'tools\msys64\usr\bin\bash.exe'))
    }
 
    $pathBash = Get-Command 'bash.exe' -ErrorAction SilentlyContinue
@@ -947,7 +1072,25 @@ function Resolve-MsysBash {
       }
    }
 
-   throw 'bash.exe do MSYS2 nao foi encontrado. Instale MSYS2 ou informe -MsysBash C:\msys64\usr\bin\bash.exe.'
+   if (-not $SkipBootstrap) {
+      $bootstrap = Join-Path $ProjectRoot 'scripts\Bootstrap-Tools.ps1'
+      if ($DryRun) {
+         Write-Host 'DryRun: .\scripts\Bootstrap-Tools.ps1 -Tool MSYS'
+         return (Join-Path $localRoot 'msys64\usr\bin\bash.exe')
+      }
+
+      & $bootstrap -Tool MSYS
+      if (-not $?) {
+         throw 'Falha ao preparar MSYS2 local.'
+      }
+
+      $local = Find-EnvironmentBash -Root $localRoot -Environment msys
+      if ($local) {
+         return $local.FullName
+      }
+   }
+
+   throw 'bash.exe do MSYS2 nao foi encontrado. Use -MsysPath, instale em tools\msys ou permita o bootstrap automatico.'
 }
 
 function Assert-CygwinTool {
@@ -998,7 +1141,7 @@ function Assert-WslTool {
       [string] $User = ''
    )
 
-   $arguments = (Get-WslArguments -Distro $Distro -User $User) + @('bash', '-lc', "command -v $(Format-ShArgument $Name) >/dev/null")
+   $arguments = (Get-WslArguments -Distro $Distro -User $User) + @('bash', '-c', "command -v $(Format-ShArgument $Name) >/dev/null")
    & wsl.exe @arguments
    if ($LASTEXITCODE -ne 0) {
       throw "Ferramenta '$Name' nao foi encontrada no WSL. Instale os pacotes de build dentro da distro WSL."
@@ -1109,7 +1252,9 @@ function Assert-ZigToolchain {
 function Initialize-Runner {
    param(
       [Parameter(Mandatory = $true)][string] $Runner,
+      [Parameter(Mandatory = $true)][string] $ToolsRootPath,
       [string] $CygwinBashPath = '',
+      [string] $CygwinSetupPath = '',
       [string] $MsysBashPath = '',
       [string] $Distro = '',
       [string] $WslUserName = '',
@@ -1117,6 +1262,7 @@ function Initialize-Runner {
       [string] $DockerfilePath = '',
       [string] $DockerBuildContext = '',
       [string] $HarbourRootPath = '',
+      [switch] $SkipToolBootstrap,
       [switch] $DryRun
    )
 
@@ -1129,7 +1275,12 @@ function Initialize-Runner {
          }
       }
       'cygwin' {
-         $bash = Resolve-CygwinBash -PreferredPath $CygwinBashPath
+         $bash = Resolve-CygwinBash `
+            -PreferredPath $CygwinBashPath `
+            -ToolsRoot $ToolsRootPath `
+            -SetupPath $CygwinSetupPath `
+            -SkipBootstrap:$SkipToolBootstrap `
+            -DryRun:$DryRun
          if (-not $DryRun) {
             Assert-CygwinTool -BashPath $bash -Name 'make'
             Assert-CygwinTool -BashPath $bash -Name 'gcc'
@@ -1143,7 +1294,11 @@ function Initialize-Runner {
          }
       }
       'msys' {
-         $bash = Resolve-MsysBash -PreferredPath $MsysBashPath
+         $bash = Resolve-MsysBash `
+            -PreferredPath $MsysBashPath `
+            -ToolsRoot $ToolsRootPath `
+            -SkipBootstrap:$SkipToolBootstrap `
+            -DryRun:$DryRun
          if (-not $DryRun) {
             Assert-MsysTool -BashPath $bash -Name 'make'
             Assert-MsysTool -BashPath $bash -Name 'gcc'
@@ -1220,12 +1375,26 @@ function ConvertTo-CygwinPath {
       [Parameter(Mandatory = $true)][string] $BashPath
    )
 
-   $converted = & $BashPath -lc "cygpath -au $(Format-ShArgument $Path)"
-   if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string] $converted)) {
-      throw "Falha ao converter path para Cygwin: $Path"
+   if (Test-Path -LiteralPath $BashPath) {
+      $converted = & $BashPath -lc "cygpath -au $(Format-ShArgument $Path)"
+      if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace([string] $converted)) {
+         return [string] ($converted | Select-Object -Last 1)
+      }
    }
 
-   return [string] ($converted | Select-Object -Last 1)
+   $fullPath = [System.IO.Path]::GetFullPath($Path)
+   $root = [System.IO.Path]::GetPathRoot($fullPath)
+   if ($root -match '^([A-Za-z]):\\$') {
+      $drive = $matches[1].ToLowerInvariant()
+      $relative = $fullPath.Substring($root.Length).Replace('\', '/')
+      if ([string]::IsNullOrWhiteSpace($relative)) {
+         return "/cygdrive/$drive"
+      }
+
+      return "/cygdrive/$drive/$relative"
+   }
+
+   throw "Falha ao converter path para Cygwin: $Path"
 }
 
 function ConvertTo-MsysPath {
@@ -1234,9 +1403,11 @@ function ConvertTo-MsysPath {
       [Parameter(Mandatory = $true)][string] $BashPath
    )
 
-   $converted = & $BashPath -lc "cygpath -au $(Format-ShArgument $Path)" 2>$null
-   if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace([string] $converted)) {
-      return [string] ($converted | Select-Object -Last 1)
+   if (Test-Path -LiteralPath $BashPath) {
+      $converted = & $BashPath -lc "cygpath -au $(Format-ShArgument $Path)" 2>$null
+      if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace([string] $converted)) {
+         return [string] ($converted | Select-Object -Last 1)
+      }
    }
 
    $fullPath = [System.IO.Path]::GetFullPath($Path)
@@ -1607,7 +1778,9 @@ if ($Runner -eq 'docker') {
 
 $runnerState = Initialize-Runner `
    -Runner $Runner `
+   -ToolsRootPath $ToolsRoot `
    -CygwinBashPath $CygwinBash `
+   -CygwinSetupPath $CygwinSetup `
    -MsysBashPath $MsysBash `
    -Distro $WslDistro `
    -WslUserName $WslUser `
@@ -1615,6 +1788,7 @@ $runnerState = Initialize-Runner `
    -DockerfilePath $dockerfilePath `
    -DockerBuildContext $ProjectRoot `
    -HarbourRootPath $HarbourRoot `
+   -SkipToolBootstrap:$SkipToolBootstrap `
    -DryRun:$DryRun
 
 foreach ($requirement in (@($ProfileConfig.requires) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
@@ -1869,6 +2043,16 @@ foreach ($key in $Env.Keys) {
    $envMap[$key] = [string] $Env[$key]
 }
 
+if (($runnerState.Name -eq 'cygwin' -or $runnerState.Name -eq 'msys') -and
+   -not $envMap.Contains('GIT_CONFIG_COUNT') -and
+   [string]::IsNullOrWhiteSpace($env:GIT_CONFIG_COUNT)) {
+   $envMap['GIT_CONFIG_COUNT'] = '2'
+   $envMap['GIT_CONFIG_KEY_0'] = 'safe.directory'
+   $envMap['GIT_CONFIG_VALUE_0'] = Convert-PathForRunner -Path $HarbourRoot -RunnerState $runnerState
+   $envMap['GIT_CONFIG_KEY_1'] = 'core.safecrlf'
+   $envMap['GIT_CONFIG_VALUE_1'] = 'false'
+}
+
 if ($ignoredContribExcludes.Count -gt 0) {
    $currentContribFilter = ''
    if ($envMap.Contains('HB_BUILD_CONTRIBS')) {
@@ -1978,7 +2162,7 @@ elseif ($runnerState.Name -eq 'docker') {
 }
 else {
    $wslPrefix = if ($runnerState.WslArguments.Count -gt 0) { "wsl.exe $($runnerState.WslArguments -join ' ')" } else { 'wsl.exe' }
-   "$wslPrefix bash -lc $(Format-ShArgument $shellScript)"
+   "$wslPrefix bash -c $(Format-ShArgument $shellScript)"
 }
 $dockerBuildDisplay = ''
 if ($runnerState.Name -eq 'docker' -and -not $SkipDockerBuild) {
@@ -2097,7 +2281,7 @@ else {
             Tee-Object -FilePath $logPath
       }
       else {
-         $wslProcessArgs = @($runnerState.WslArguments) + @('bash', '-lc', $shellScript)
+         $wslProcessArgs = @($runnerState.WslArguments) + @('bash', '-c', $shellScript)
          & wsl.exe @wslProcessArgs 2>&1 |
             ForEach-Object { $_.ToString() } |
             Tee-Object -FilePath $logPath

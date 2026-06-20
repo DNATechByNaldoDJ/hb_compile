@@ -112,9 +112,10 @@ para impedir que o plugin Qt procure `moc`.
 
 ## Padrao de toolchains
 
-Toolchains portateis seguem sempre a mesma prioridade:
+Toolchains e ambientes de build seguem sempre a mesma prioridade:
 
-1. Caminho informado por parametro, como `-ZigPath` ou `-MinGwPath`.
+1. Caminho informado por parametro, como `-ZigPath`, `-MinGwPath`,
+   `-CygwinPath` ou `-MsysPath`.
 2. Ferramenta ja baixada em `tools\<compiler>`.
 3. Ferramenta ja disponivel no `PATH`.
 4. Bootstrap automatico por `scripts\Bootstrap-Tools.ps1`, salvo quando
@@ -125,6 +126,8 @@ Exemplos:
 ```powershell
 .\build-zig.ps1 -ZigPath C:\Tools\zig\zig.exe -Clean
 .\build-full-mingw64.ps1 -MinGwPath C:\Tools\xpack-mingw-w64-gcc\bin -IgnoreDependency qt -Clean
+.\build-cygwin.ps1 -CygwinPath D:\cygwin64 -Clean
+.\build-msys.ps1 -MsysPath E:\msys64 -Clean
 ```
 
 Se nenhum caminho for informado, os builds procuram primeiro em:
@@ -132,6 +135,8 @@ Se nenhum caminho for informado, os builds procuram primeiro em:
 ```text
 tools\zig\...\zig.exe
 tools\mingw64\...\bin\gcc.exe
+tools\cygwin\bin\bash.exe
+tools\msys\...\usr\bin\bash.exe
 ```
 
 Se ainda nao houver ferramenta valida, o executor baixa automaticamente:
@@ -139,6 +144,8 @@ Se ainda nao houver ferramenta valida, o executor baixa automaticamente:
 ```powershell
 .\scripts\Bootstrap-Tools.ps1 -Tool Zig
 .\scripts\Bootstrap-Tools.ps1 -Tool MinGW64
+.\scripts\Bootstrap-Tools.ps1 -Tool Cygwin
+.\scripts\Bootstrap-Tools.ps1 -Tool MSYS
 .\scripts\Bootstrap-Tools.ps1 -Tool All
 ```
 
