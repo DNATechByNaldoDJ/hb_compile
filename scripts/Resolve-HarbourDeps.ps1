@@ -1032,6 +1032,43 @@ function Get-DependencySourceFallback {
    return $null
 }
 
+function Update-SourceFallbackCompatibility {
+   param(
+      [Parameter(Mandatory = $true)][string] $DependencyName,
+      [Parameter(Mandatory = $true)][string] $IncludeRoot
+   )
+
+   if ($DependencyName -ne 'ads') {
+      return
+   }
+
+   $aceHeader = Join-NativePath -Root $IncludeRoot -Child 'ace.h'
+   if (-not (Test-Path -LiteralPath $aceHeader)) {
+      return
+   }
+
+   $content = Get-Content -LiteralPath $aceHeader -Raw
+   $updated = $content
+
+   if ($updated -notmatch '#\s*define\s+ADSFIELD') {
+      $adsFieldBlock = @'
+
+#ifndef ADSFIELD
+#  define ADSFIELD( n ) ( ( UNSIGNED8 * ) ( uintptr_t ) ( n ) )
+#endif
+'@
+      $updated = $updated -replace '(typedef\s+uint64_t\s+ADSHANDLE;\s*)', ('$1' + $adsFieldBlock)
+   }
+
+   $updated = $updated -replace 'UNSIGNED16\*\s*pucValueW', 'void* pucValueW'
+   $updated = $updated -replace 'UNSIGNED16\*\s*pucBufW', 'void* pucBufW'
+
+   if ($updated -ne $content) {
+      Set-Content -LiteralPath $aceHeader -Value $updated -Encoding ASCII
+      Write-Host "Compatibilidade OpenADS aplicada: $aceHeader"
+   }
+}
+
 function Install-SourceFallback {
    param(
       [Parameter(Mandatory = $true)][string] $DependencyName,
@@ -1136,6 +1173,8 @@ function Install-SourceFallback {
    elseif (-not [string]::IsNullOrWhiteSpace($ref)) {
       Write-Warning "Fallback '$displayName' ja existe em '$sourceRoot'; sourceFallback.ref so e aplicado durante o clone."
    }
+
+   Update-SourceFallbackCompatibility -DependencyName $DependencyName -IncludeRoot $includeRoot
 
    $found = Test-HeaderInRoot -Root $includeRoot -DependencyConfig $DependencyConfig
    if ($found.Found) {

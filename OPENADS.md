@@ -33,11 +33,15 @@ no arquivo `config\external-deps.generated.ps1`.
 
 O Harbour atual ainda referencia algumas definicoes historicas do SDK ADS. O
 OpenADS usado como fallback nao traz todas elas exatamente no mesmo formato, por
-isso este checkout usa tres ajustes locais:
+isso este checkout usa quatro ajustes locais:
 
 - `scratch\openads\include\openads\ace.h`: adiciona `ADSFIELD(n)` quando a
   macro nao existir. Ela converte identificador numerico de campo para o tipo
   `UNSIGNED8 *` esperado pelas chamadas antigas do ADS.
+- `scratch\openads\include\openads\ace.h`: normaliza os buffers das chamadas
+  Unicode `AdsSetStringW`, `AdsGetStringW` e `AdsGetFieldW` como `void *`. No
+  MSVC, isso evita erro entre `WCHAR *` e `UNSIGNED16 *`; o ABI continua sendo
+  apenas ponteiro para dados UTF-16LE.
 - `scratch\harbour-core\contrib\rddads\adsfunc.c`: protege a redefinicao de
   `ADS_MAX_PARAMDEF_LEN` com `#undef`, evitando warning de macro redefinida
   quando o header externo ja declara esse simbolo.
