@@ -1229,6 +1229,9 @@ function Get-VcpkgLibPathFlag {
    )
 
    $normalizedCompiler = $Compiler.ToLowerInvariant()
+   if ($normalizedCompiler -like 'zig*' -or $normalizedCompiler -like 'mingw*') {
+      return "-L$($Path.Replace('\', '/'))"
+   }
    if ($normalizedCompiler -like 'msvc*' -or ($TripletName -like '*windows*' -and $TripletName -notlike '*mingw*')) {
       return "-libpath:$Path"
    }
@@ -1259,6 +1262,14 @@ function Add-VcpkgLinkerFlags {
       $existingGeneratedDyFlags = [string] $Values['HB_USER_DFLAGS']
    }
    Add-UniqueWords -Words $dyFlags -Value $existingGeneratedDyFlags
+
+   $normalizedCompiler = $Compiler.ToLowerInvariant()
+   if ($normalizedCompiler -like 'zig*' -or $normalizedCompiler -like 'mingw*') {
+      # Generated environment files from older runs may contain the MSVC-only
+      # spelling. Do not feed it back into Zig/MinGW command lines.
+      $ldFlags = [System.Collections.Generic.List[string]] @($ldFlags | Where-Object { $_ -notmatch '^-libpath:' })
+      $dyFlags = [System.Collections.Generic.List[string]] @($dyFlags | Where-Object { $_ -notmatch '^-libpath:' })
+   }
 
    foreach ($tripletName in @($Results | Where-Object { $_.Status -eq 'ok' -and $_.Provider -eq 'vcpkg' } | ForEach-Object { $_.Triplet } | Select-Object -Unique)) {
       if ([string]::IsNullOrWhiteSpace([string] $tripletName)) {
