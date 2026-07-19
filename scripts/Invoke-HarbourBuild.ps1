@@ -12,6 +12,10 @@ param(
    [string] $HarbourRoot,
    [string] $HarbourRepository,
    [string] $HarbourRef,
+   [switch] $WithHbdap,
+   [string] $HbdapRoot,
+   [string] $HbdapRepository = 'https://github.com/DNATechByNaldoDJ/hbdap.git',
+   [string] $HbdapRef,
    [string[]] $MakeArg = @(),
    [hashtable] $Env = @{},
    [switch] $Full,
@@ -1752,6 +1756,36 @@ if ($Runner -eq 'windows' -and -not (Test-Path -LiteralPath $makeExe) -and ($har
 $makefile = Join-Path $HarbourRoot 'Makefile'
 if (-not (Test-Path -LiteralPath $makefile) -and ($harbourSourceReady -or -not $DryRun)) {
    throw "Makefile do Harbour nao encontrado: $makefile"
+}
+
+if ($WithHbdap) {
+   if ([string]::IsNullOrWhiteSpace($HbdapRoot)) {
+      $siblingHbdap = Join-Path (Split-Path -Parent $ProjectRoot) 'hbdap'
+      $HbdapRoot = if (Test-Path -LiteralPath $siblingHbdap) {
+         $siblingHbdap
+      }
+      else {
+         Join-Path $ProjectRoot 'scratch\hbdap'
+      }
+   }
+   elseif (-not [System.IO.Path]::IsPathRooted($HbdapRoot)) {
+      $HbdapRoot = Join-Path $ProjectRoot $HbdapRoot
+   }
+
+   $hbdapPreparer = Join-Path $ProjectRoot 'scripts\Install-HbdapContrib.ps1'
+   if (-not (Test-Path -LiteralPath $hbdapPreparer)) {
+      throw "Preparador opcional do hbdap nao encontrado: $hbdapPreparer"
+   }
+
+   & $hbdapPreparer `
+      -HarbourRoot $HarbourRoot `
+      -HbdapRoot $HbdapRoot `
+      -HbdapRepository $HbdapRepository `
+      -HbdapRef $HbdapRef `
+      -DryRun:$DryRun
+   if (-not $?) {
+      throw 'Falha ao preparar o hbdap como contrib do Harbour.'
+   }
 }
 
 New-Item -ItemType Directory -Force -Path $OutputRoot, $LogsRoot, $ToolsRoot | Out-Null

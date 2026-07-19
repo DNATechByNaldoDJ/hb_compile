@@ -25,7 +25,9 @@ outputs separate from the Harbour source tree.
 
 See [HOWTO.md](HOWTO.md) for the complete workflow,
 [DEPENDENCIES.md](DEPENDENCIES.md) for optional libraries, and
-[OPENADS.md](OPENADS.md) for the OpenADS fallback. Windows Sandbox behavior and
+[OPENADS.md](OPENADS.md) for the OpenADS fallback. Optional HBDAP integration is
+documented in [HBDAP.md](HBDAP.md), and planned work in [TODO.md](TODO.md).
+Windows Sandbox behavior and
 limitations are documented in [BUILD-SANDBOX.md](BUILD-SANDBOX.md).
 
 ## Quick start
@@ -36,6 +38,15 @@ limitations are documented in [BUILD-SANDBOX.md](BUILD-SANDBOX.md).
 .\build-zig.ps1 -DryRun
 .\build-zig.ps1 -Clean
 ```
+
+Opt in to HBDAP as a native Harbour contrib:
+
+```powershell
+.\build-zig.ps1 -WithHbdap
+.\build-full-linux-wsl.ps1 -WithHbdap -IgnoreDependency qt
+```
+
+Without `-WithHbdap`, Harbour's build remains unchanged.
 
 Run an isolated Windows Sandbox build:
 

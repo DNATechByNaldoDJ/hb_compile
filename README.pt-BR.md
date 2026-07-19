@@ -29,6 +29,8 @@ Harbour.
 - `HOWTO.pt-BR.md`: guia central do processo de build, perfis, logs e troubleshooting.
 - `DEPENDENCIES.pt-BR.md`: guia de dependencias, conjuntos e wrappers full.
 - `OPENADS.pt-BR.md`: detalhes do fallback OpenADS usado pelo contrib `rddads`.
+- `HBDAP.pt-BR.md`: integração opcional do depurador DAP para Harbour.
+- `TODO.pt-BR.md`: roadmap de builds, integrações e validações.
 - `BUILD-SANDBOX.pt-BR.md`: especificação, limitações e validação no Windows Sandbox.
 - `scripts\Invoke-HarbourBuild.ps1`: executor principal.
 - `scripts\Bootstrap-Tools.ps1`: baixa ferramentas locais como Zig e MinGW-w64.
@@ -61,6 +63,16 @@ Ver o comando sem compilar:
 ```powershell
 .\build-zig.ps1 -DryRun
 ```
+
+Incluir opcionalmente o hbdap no build nativo de contribs:
+
+```powershell
+.\build-zig.ps1 -WithHbdap
+.\build-full-linux-wsl.ps1 -WithHbdap -IgnoreDependency qt
+```
+
+Sem `-WithHbdap`, o build do Harbour permanece inalterado. Consulte
+[HBDAP.pt-BR.md](HBDAP.pt-BR.md).
 
 Executar um build isolado no Windows Sandbox:
 
