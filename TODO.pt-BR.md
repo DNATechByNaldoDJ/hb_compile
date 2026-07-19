@@ -14,6 +14,22 @@
 - [ ] Produzir manifesto conjunto com revisões Harbour e hbdap.
 - [ ] Empacotar Harbour + hbdap para o `v0.1.0-alpha`.
 
+## Testes integrados de contribs opcionais
+
+- [ ] Criar `scripts/Test-OptionalContribs.ps1` para testar OpenADS e HBDAP
+  somente quando solicitados.
+- [ ] Validar a solicitação e os artefatos instalados antes do teste funcional:
+  `librddads`, `libace`, `libhbdap` e metadados do build.
+- [ ] Compilar e executar um programa Harbour mínimo que crie, abra e consulte
+  uma tabela por `rddads` em WSL e Docker.
+- [ ] Compilar e executar um consumidor Harbour mínimo da API pública do HBDAP
+  nos perfis suportados.
+- [ ] Integrar a suíte própria do HBDAP quando o checkout estiver disponível.
+- [ ] Incluir `hbdap_adapter` e `hbdap_cli` no teste depois que forem instalados
+  em `out/<perfil>/bin`.
+- [ ] Expor os testes pela matriz de `Test-HarbourBuilds.ps1`, distinguindo
+  compilação/link, smoke funcional e suíte completa.
+
 ## Linux e armazenamento
 
 - [x] Adicionar OpenADS opt-in para WSL e Docker com `-WithOpenAds`.
