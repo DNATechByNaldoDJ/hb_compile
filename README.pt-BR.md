@@ -74,6 +74,15 @@ Incluir opcionalmente o hbdap no build nativo de contribs:
 Sem `-WithHbdap`, o build do Harbour permanece inalterado. Consulte
 [HBDAP.pt-BR.md](HBDAP.pt-BR.md).
 
+Compilar também OpenADS e habilitar `rddads` no Linux:
+
+```powershell
+.\build-full-linux-wsl.ps1 -WithOpenAds -IgnoreDependency qt
+.\build-full-linux-docker.ps1 -WithOpenAds -IgnoreDependency qt
+```
+
+Consulte [OPENADS.pt-BR.md](OPENADS.pt-BR.md).
+
 Executar um build isolado no Windows Sandbox:
 
 ```powershell

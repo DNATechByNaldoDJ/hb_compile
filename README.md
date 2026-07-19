@@ -48,6 +48,13 @@ Opt in to HBDAP as a native Harbour contrib:
 
 Without `-WithHbdap`, Harbour's build remains unchanged.
 
+Build OpenADS and enable `rddads` on Linux:
+
+```powershell
+.\build-full-linux-wsl.ps1 -WithOpenAds -IgnoreDependency qt
+.\build-full-linux-docker.ps1 -WithOpenAds -IgnoreDependency qt
+```
+
 Run an isolated Windows Sandbox build:
 
 ```powershell

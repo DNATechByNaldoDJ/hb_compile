@@ -12,6 +12,7 @@ RUN set -eux; \
       binutils \
       build-essential \
       ca-certificates \
+      cmake \
       file \
       git \
       make \

@@ -16,6 +16,10 @@ param(
    [string] $HbdapRoot,
    [string] $HbdapRepository = 'https://github.com/DNATechByNaldoDJ/hbdap.git',
    [string] $HbdapRef,
+   [switch] $WithOpenAds,
+   [string] $OpenAdsRoot,
+   [string] $OpenAdsRepository = 'https://github.com/FiveTechSoft/OpenADS.git',
+   [string] $OpenAdsRef,
    [string[]] $MakeArg = @(),
    [hashtable] $Env = @{},
    [switch] $Full,
@@ -1550,6 +1554,7 @@ function New-ShellBuildScript {
       [Parameter(Mandatory = $true)] $EnvMap,
       [Parameter(Mandatory = $true)][string[]] $MakeArgs,
       [string[]] $CleanMakeArgs = @(),
+      [string[]] $PrefixCommands = @(),
       [Parameter(Mandatory = $true)] $RunnerState
    )
 
@@ -1557,7 +1562,7 @@ function New-ShellBuildScript {
    $assignments = foreach ($key in $EnvMap.Keys) {
       "$key=$(Format-ShArgument ([string] $EnvMap[$key]))"
    }
-   $commands = @()
+   $commands = @($PrefixCommands)
    if ($CleanMakeArgs.Count -gt 0) {
       $cleanCommand = (@('make') + $CleanMakeArgs | ForEach-Object { Format-ShArgument ([string] $_) }) -join ' '
       $commands += "env $($assignments -join ' ') $cleanCommand"
@@ -1788,6 +1793,38 @@ if ($WithHbdap) {
    }
 }
 
+if ($WithOpenAds -and $Runner -notin @('wsl', 'docker')) {
+   throw '-WithOpenAds atualmente e suportado apenas nos perfis WSL e Docker.'
+}
+if ($WithOpenAds) {
+   if ([string]::IsNullOrWhiteSpace($OpenAdsRoot)) {
+      $OpenAdsRoot = Join-Path $ProjectRoot 'scratch\openads'
+   }
+   elseif (-not [System.IO.Path]::IsPathRooted($OpenAdsRoot)) {
+      $OpenAdsRoot = Join-Path $ProjectRoot $OpenAdsRoot
+   }
+
+   $openAdsInitializer = Join-Path $ProjectRoot 'scripts\Initialize-OpenAds.ps1'
+   & $openAdsInitializer `
+      -OpenAdsRoot $OpenAdsRoot `
+      -OpenAdsRepository $OpenAdsRepository `
+      -OpenAdsRef $OpenAdsRef `
+      -DryRun:$DryRun
+   if (-not $?) {
+      throw 'Falha ao preparar o checkout OpenADS.'
+   }
+
+   $openAdsBuildRoot = Join-Path $OutputRoot "openads-$BuildProfile"
+   $openAdsCompatibility = Join-Path $ProjectRoot 'scripts\Prepare-OpenAdsCompatibility.ps1'
+   & $openAdsCompatibility `
+      -OpenAdsRoot $OpenAdsRoot `
+      -CompatibilityRoot (Join-Path $openAdsBuildRoot 'compat') `
+      -DryRun:$DryRun
+   if (-not $?) {
+      throw 'Falha ao preparar a compatibilidade OpenADS/Harbour.'
+   }
+}
+
 New-Item -ItemType Directory -Force -Path $OutputRoot, $LogsRoot, $ToolsRoot | Out-Null
 Add-LocalToolPaths -ToolsRoot $ToolsRoot
 
@@ -1982,6 +2019,11 @@ New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
 $envMap = [ordered]@{}
 $envMap['HB_INSTALL_PREFIX'] = $installRoot
 
+if ($WithOpenAds) {
+   $envMap['HB_WITH_ADS'] = Join-Path $openAdsBuildRoot 'compat\include\openads'
+   $envMap['HB_USER_LIBPATHS'] = Join-Path $openAdsBuildRoot 'src'
+}
+
 foreach ($item in @($ProfileConfig.env.PSObject.Properties)) {
    $envMap[$item.Name] = [string] $item.Value
 }
@@ -2160,7 +2202,15 @@ $logPath = Join-Path $LogsRoot "$stamp-$safeProfile.log"
 $targetEnvMap = Convert-EnvMapForRunner -EnvMap $envMap -RunnerState $runnerState
 $shellScript = ''
 if ($runnerState.Name -ne 'windows') {
-   $shellScript = New-ShellBuildScript -HarbourRoot $HarbourRoot -EnvMap $targetEnvMap -MakeArgs $makeArgs -CleanMakeArgs $cleanMakeArgs -RunnerState $runnerState
+   $prefixCommands = @()
+   if ($WithOpenAds) {
+      $targetOpenAdsRoot = Convert-PathForRunner -Path $OpenAdsRoot -RunnerState $runnerState
+      $targetOpenAdsBuildRoot = Convert-PathForRunner -Path $openAdsBuildRoot -RunnerState $runnerState
+      $prefixCommands += "cmake -S $(Format-ShArgument $targetOpenAdsRoot) -B $(Format-ShArgument $targetOpenAdsBuildRoot) -DCMAKE_BUILD_TYPE=Release -DOPENADS_BUILD_TESTS=OFF -DOPENADS_WITH_HTTP=OFF -DOPENADS_WITH_TLS=OFF -DOPENADS_WARNINGS_AS_ERRORS=ON"
+      $prefixCommands += "cmake --build $(Format-ShArgument $targetOpenAdsBuildRoot) --target openads_ace -j $Jobs"
+      $prefixCommands += "ln -sf libopenace64.so $(Format-ShArgument ($targetOpenAdsBuildRoot.TrimEnd('/') + '/src/libace.so'))"
+   }
+   $shellScript = New-ShellBuildScript -HarbourRoot $HarbourRoot -EnvMap $targetEnvMap -MakeArgs $makeArgs -CleanMakeArgs $cleanMakeArgs -PrefixCommands $prefixCommands -RunnerState $runnerState
 }
 $dockerBuildArgs = @()
 $dockerRunArgs = @()

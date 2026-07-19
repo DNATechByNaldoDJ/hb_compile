@@ -16,6 +16,9 @@
 
 ## Linux e armazenamento
 
+- [x] Adicionar OpenADS opt-in para WSL e Docker com `-WithOpenAds`.
+- [x] Validar `librddads.a` e `libace.so` em builds full WSL e Docker.
+- [ ] Executar um smoke test Harbour/OpenADS nos dois runners Linux.
 - [x] Concluir builds full WSL e Docker com `-IgnoreDependency qt`.
 - [x] Validar hbdap nos artefatos `linux-wsl` e `linux-docker`.
 - [ ] Permitir que logs usem um diretório em volume diferente do workspace.

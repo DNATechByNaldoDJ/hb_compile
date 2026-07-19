@@ -15,12 +15,60 @@ is available.
 The resolved include and library root is exported through `HB_WITH_ADS` before
 Harbour make processes `rddads`.
 
+WSL and Docker provide a strict opt-in path:
+
+```powershell
+.\build-full-linux-wsl.ps1 -WithOpenAds -IgnoreDependency qt
+.\build-full-linux-docker.ps1 -WithOpenAds -IgnoreDependency qt
+```
+
+The runner builds the `openads_ace` CMake target, creates the Linux
+`libace.so` compatibility name, exports `HB_WITH_ADS`, and adds the library
+directory to `HB_USER_LIBPATHS`. Use `-OpenAdsRoot`, `-OpenAdsRepository`, and
+`-OpenAdsRef` to pin the source. Without `-WithOpenAds`, Linux behavior remains
+unchanged.
+
+OpenADS itself is compiled with its concrete `UNSIGNED16 *` Unicode
+signatures. A separate header copy under `out/openads-<profile>/compat` receives
+the `void *` compatibility required by Harbour `rddads`, keeping the two build
+contracts isolated.
+
 ## Local compatibility adjustments
 
 OpenADS is not identical to every historical ADS SDK release expected by
 Harbour. The resolver prepares a local working copy and applies the compatibility
 adjustments required by the contrib headers and linker. The upstream origin
 must remain identifiable so updates can be audited and regenerated.
+
+The generated Harbour-only header adds the legacy `DOUBLE`, `WCHAR`, `VOID`,
+and `ADSFIELD` definitions and applies the `void *` Unicode-buffer adaptation.
+The preparation step also patches known current-GCC warnings in the local
+OpenADS C++ sources: undersized `snprintf` buffers, implicit byte conversions,
+and a shadowed declaration. These patches are idempotent and do not change the
+produced ABI.
+
+OpenADS is configured with `OPENADS_WARNINGS_AS_ERRORS=ON`, so a new upstream
+warning fails visibly and requires an auditable compatibility update.
+
+## Linux validation
+
+Full `linux-wsl` and `linux-docker` builds, with Qt excluded, were validated
+with OpenADS and HBDAP enabled together. Both installed `hbmk2`, `librddads.a`,
+and `libhbdap.a`; OpenADS produced `libopenace64.so` and its `libace.so`
+compatibility link. Functional ADS operation smoke tests remain tracked
+separately in the TODO.
+
+The `hello.prg` sample was also compiled and executed under MinGW64, MSVC64,
+Cygwin, MSYS, WSL, Docker, and Zig. Select the full Docker image explicitly
+when testing an installation produced by a full build:
+
+```powershell
+pwsh ./scripts/Test-HarbourBuilds.ps1 -Profile linux-docker `
+  -DockerImage hb-compile/linux:full
+```
+
+The `hb-compile/linux:base` image is not expected to run binaries linked
+against the full image's additional dependencies.
 
 Do not silently substitute an unrelated ADS client. Header declarations,
 calling conventions, architecture, and import-library format must match the
