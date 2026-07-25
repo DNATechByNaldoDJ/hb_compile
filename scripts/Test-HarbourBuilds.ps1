@@ -112,12 +112,26 @@ function ConvertTo-RunnerPath {
 
    $fullPath = [System.IO.Path]::GetFullPath($Path)
    if ($Runner -eq 'docker') {
-      $projectFull = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\')
-      if (-not $fullPath.Equals($projectFull, [System.StringComparison]::OrdinalIgnoreCase) -and
-         -not $fullPath.StartsWith("$projectFull\", [System.StringComparison]::OrdinalIgnoreCase)) {
+      $trimChars = [char[]] '\/'
+      $projectFull = [System.IO.Path]::GetFullPath(
+         $ProjectRoot
+      ).TrimEnd($trimChars)
+      $comparison = if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+         [System.Runtime.InteropServices.OSPlatform]::Windows
+      )) {
+         [System.StringComparison]::OrdinalIgnoreCase
+      }
+      else {
+         [System.StringComparison]::Ordinal
+      }
+      $projectPrefix = $projectFull + [System.IO.Path]::DirectorySeparatorChar
+      if (-not $fullPath.Equals($projectFull, $comparison) -and
+         -not $fullPath.StartsWith($projectPrefix, $comparison)) {
          throw "Path fora do volume Docker: $Path"
       }
-      $relative = $fullPath.Substring($projectFull.Length).TrimStart('\').Replace('\', '/')
+      $relative = $fullPath.Substring(
+         $projectFull.Length
+      ).TrimStart($trimChars).Replace('\', '/')
       return "/workspace/$relative".TrimEnd('/')
    }
 
