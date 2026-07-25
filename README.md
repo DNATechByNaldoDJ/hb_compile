@@ -2,6 +2,9 @@
 
 **English** | [Português (Brasil)](README.pt-BR.md)
 
+Continuous validation and its optional private-integration setup are described
+in [CI.md](CI.md).
+
 Build orchestration layer for compiling Harbour from a local checkout. If the
 source tree does not exist, the project clones `https://github.com/harbour/core.git`
 into `scratch\harbour-core` by default.

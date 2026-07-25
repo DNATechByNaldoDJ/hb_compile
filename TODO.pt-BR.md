@@ -2,6 +2,14 @@
 
 [English](TODO.md) | **Português (Brasil)**
 
+## Integração contínua
+
+- [x] Validar PowerShell, configurações JSON, build Docker mínimo e
+  `hello.prg` em pushes e pull requests.
+- [x] Oferecer validação Docker full agendada/manual com modos opcionais para
+  HBDAP e OpenADS.
+- [ ] Adicionar validação WSL quando houver um runner auto-hospedado adequado.
+
 ## hbdap
 
 - [x] Tornar a inclusão do hbdap opt-in com `-WithHbdap`.

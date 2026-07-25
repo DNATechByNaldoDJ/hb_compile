@@ -2,6 +2,9 @@
 
 [English](README.md) | **Português (Brasil)**
 
+A validação contínua e a configuração das integrações privadas opcionais estão
+descritas em [CI.pt-BR.md](CI.pt-BR.md).
+
 Camada de build para compilar o Harbour a partir de um checkout local. Por
 padrao, se o fonte ainda nao existir, o projeto clona:
 

@@ -1,0 +1,137 @@
+name: hb_compile full validation
+
+on:
+  schedule:
+    - cron: '17 4 * * 0'
+  workflow_dispatch:
+    inputs:
+      integration:
+        description: Optional contrib integration to include
+        required: true
+        default: none
+        type: choice
+        options:
+          - none
+          - hbdap
+          - openads
+          - hbdap-openads
+      hbdap_ref:
+        description: HBDAP branch, tag, or commit
+        required: false
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hb-compile-full-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux-docker-full:
+    name: Full Linux Docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SELECTED_INTEGRATION: ${{ inputs.integration || 'none' }}
+      HBDAP_REF: ${{ inputs.hbdap_ref || 'main' }}
+    steps:
+      - name: Checkout hb_compile
+        uses: actions/checkout@v5
+
+      - name: Require the private HBDAP token when requested
+        if: contains(inputs.integration, 'hbdap')
+        shell: pwsh
+        env:
+          HBDAP_TOKEN: ${{ secrets.HBDAP_CROSS_REPO_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:HBDAP_TOKEN)) {
+            throw 'HBDAP_CROSS_REPO_TOKEN is required for an HBDAP validation.'
+          }
+
+      - name: Checkout HBDAP
+        if: contains(inputs.integration, 'hbdap')
+        uses: actions/checkout@v5
+        with:
+          repository: DNATechByNaldoDJ/hbdap
+          ref: ${{ inputs.hbdap_ref }}
+          token: ${{ secrets.HBDAP_CROSS_REPO_TOKEN }}
+          path: hbdap-source
+
+      - name: Build full Harbour profile
+        shell: pwsh
+        run: |
+          $arguments = @(
+            '-IgnoreDependency', 'qt'
+          )
+          if ($env:SELECTED_INTEGRATION -in @('hbdap', 'hbdap-openads')) {
+            $arguments += @(
+              '-WithHbdap',
+              '-HbdapRoot', (Join-Path $env:GITHUB_WORKSPACE 'hbdap-source')
+            )
+          }
+          if ($env:SELECTED_INTEGRATION -in @('openads', 'hbdap-openads')) {
+            $arguments += '-WithOpenAds'
+          }
+          ./build-full-linux-docker.ps1 @arguments
+
+      - name: Compile and run hello.prg
+        shell: pwsh
+        run: |
+          ./scripts/Test-HarbourBuilds.ps1 `
+            -BuildProfile linux-docker `
+            -DockerImage hb-compile/linux:full `
+            -TimeoutSeconds 600 `
+            -Internal
+
+      - name: Verify requested optional contrib artifacts
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:GITHUB_WORKSPACE 'out/linux-docker'
+          $files = Get-ChildItem -LiteralPath $root -Recurse -File
+          if ($env:SELECTED_INTEGRATION -in @('hbdap', 'hbdap-openads')) {
+            if (-not ($files.Name -contains 'libhbdap.a')) {
+              throw 'Requested HBDAP build did not install libhbdap.a.'
+            }
+            if (-not (Test-Path -LiteralPath (
+              Join-Path $env:GITHUB_WORKSPACE (
+                'scratch/harbour-core/contrib/hbdap/HBDAP_BUILD_INFO.json'
+              )
+            ))) {
+              throw 'Requested HBDAP build did not record HBDAP_BUILD_INFO.json.'
+            }
+          }
+          if ($env:SELECTED_INTEGRATION -in @('openads', 'hbdap-openads')) {
+            if (-not ($files.Name -contains 'librddads.a')) {
+              throw 'Requested OpenADS build did not install librddads.a.'
+            }
+            $openAdsRoot = Join-Path $env:GITHUB_WORKSPACE (
+              'out/openads-linux-docker/src'
+            )
+            foreach ($name in @('libopenace64.so', 'libace.so')) {
+              if (-not (Test-Path -LiteralPath (Join-Path $openAdsRoot $name))) {
+                throw "Requested OpenADS build did not produce $name."
+              }
+            }
+          }
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hb-compile-full-${{ env.SELECTED_INTEGRATION }}-logs
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 21
+
+      - name: Upload build metadata
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hb-compile-full-${{ env.SELECTED_INTEGRATION }}-metadata
+          path: |
+            out/linux-docker/**/*BUILD_INFO.json
+            scratch/harbour-core/contrib/hbdap/HBDAP_BUILD_INFO.json
+          if-no-files-found: ignore
+          retention-days: 21

@@ -1,0 +1,100 @@
+name: hb_compile CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hb-compile-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  powershell-quality:
+    name: PowerShell and configuration quality
+    runs-on: windows-latest
+    steps:
+      - name: Checkout hb_compile
+        uses: actions/checkout@v5
+
+      - name: Parse PowerShell scripts
+        shell: pwsh
+        run: |
+          $errors = [System.Collections.Generic.List[string]]::new()
+          Get-ChildItem -Path . -Filter '*.ps1' -Recurse -File |
+            Where-Object {
+              $_.FullName -notmatch '[\\/](out|scratch|tools)[\\/]'
+            } |
+            ForEach-Object {
+              $tokens = $null
+              $parseErrors = $null
+              [void] [System.Management.Automation.Language.Parser]::ParseFile(
+                $_.FullName,
+                [ref] $tokens,
+                [ref] $parseErrors
+              )
+              foreach ($parseError in @($parseErrors)) {
+                $errors.Add(
+                  '{0}:{1}:{2}: {3}' -f
+                    $_.FullName,
+                    $parseError.Extent.StartLineNumber,
+                    $parseError.Extent.StartColumnNumber,
+                    $parseError.Message
+                )
+              }
+            }
+          if ($errors.Count -gt 0) {
+            $errors | Write-Error
+            throw "$($errors.Count) PowerShell parse error(s) found."
+          }
+
+      - name: Validate JSON configuration
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path config -Filter '*.json' -File |
+            ForEach-Object {
+              Write-Host "Validating $($_.FullName)"
+              $null = Get-Content -LiteralPath $_.FullName -Raw |
+                ConvertFrom-Json -ErrorAction Stop
+            }
+
+  linux-docker-smoke:
+    name: Linux Docker smoke build
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout hb_compile
+        uses: actions/checkout@v5
+
+      - name: Validate Docker profile resolution
+        shell: pwsh
+        run: |
+          ./build-linux-docker.ps1 -DryRun -SkipToolBootstrap
+
+      - name: Build Harbour with the minimal Docker profile
+        shell: pwsh
+        run: |
+          ./build-linux-docker.ps1
+
+      - name: Compile and run hello.prg
+        shell: pwsh
+        run: |
+          ./scripts/Test-HarbourBuilds.ps1 `
+            -BuildProfile linux-docker `
+            -DockerImage hb-compile/linux:base `
+            -TimeoutSeconds 300 `
+            -Internal
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hb-compile-linux-docker-smoke-logs
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 14
