@@ -547,8 +547,17 @@ function Test-PathUnderRoot {
       $trimChars = [char[]] '\/'
       $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd($trimChars)
       $fullRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd($trimChars)
-      return $fullPath.Equals($fullRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
-         $fullPath.StartsWith("$fullRoot\", [System.StringComparison]::OrdinalIgnoreCase)
+      $comparison = if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+         [System.Runtime.InteropServices.OSPlatform]::Windows
+      )) {
+         [System.StringComparison]::OrdinalIgnoreCase
+      }
+      else {
+         [System.StringComparison]::Ordinal
+      }
+      $rootPrefix = $fullRoot + [System.IO.Path]::DirectorySeparatorChar
+      return $fullPath.Equals($fullRoot, $comparison) -or
+         $fullPath.StartsWith($rootPrefix, $comparison)
    }
    catch {
       return $false
@@ -1468,13 +1477,26 @@ function ConvertTo-DockerPath {
    $fullPath = [System.IO.Path]::GetFullPath($Path)
    foreach ($map in @($RunnerState.DockerPathMaps)) {
       if (Test-PathUnderRoot -Path $fullPath -Root $map.HostRoot) {
-         $hostRoot = [System.IO.Path]::GetFullPath([string] $map.HostRoot).TrimEnd('\')
+         $trimChars = [char[]] '\/'
+         $hostRoot = [System.IO.Path]::GetFullPath(
+            [string] $map.HostRoot
+         ).TrimEnd($trimChars)
          $containerRoot = ([string] $map.ContainerRoot).TrimEnd('/')
-         if ($fullPath.TrimEnd('\').Equals($hostRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+         $comparison = if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+            [System.Runtime.InteropServices.OSPlatform]::Windows
+         )) {
+            [System.StringComparison]::OrdinalIgnoreCase
+         }
+         else {
+            [System.StringComparison]::Ordinal
+         }
+         if ($fullPath.TrimEnd($trimChars).Equals($hostRoot, $comparison)) {
             return $containerRoot
          }
 
-         $relative = $fullPath.Substring($hostRoot.Length).TrimStart('\').Replace('\', '/')
+         $relative = $fullPath.Substring(
+            $hostRoot.Length
+         ).TrimStart($trimChars).Replace('\', '/')
          return "$containerRoot/$relative"
       }
    }
