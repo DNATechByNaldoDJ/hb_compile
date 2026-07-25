@@ -1629,7 +1629,7 @@ function Invoke-GitChecked {
       [Parameter(Mandatory = $true)][string] $FailureMessage
    )
 
-   & git.exe @Arguments | Out-Host
+   & git @Arguments | Out-Host
    if ($LASTEXITCODE -ne 0) {
       throw $FailureMessage
    }
@@ -1645,8 +1645,8 @@ function Initialize-HarbourSource {
    )
 
    if (Test-Path -LiteralPath $Root) {
-      if ($RepositorySpecified -and (Get-Command 'git.exe' -ErrorAction SilentlyContinue)) {
-         $origin = & git.exe -C $Root remote get-url origin 2>$null
+      if ($RepositorySpecified -and (Get-Command 'git' -ErrorAction SilentlyContinue)) {
+         $origin = & git -C $Root remote get-url origin 2>$null
          if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($origin) -and $origin -ne $Repository) {
             Write-Warning "HarbourRoot ja existe e usa '$origin'. Para clonar '$Repository', informe tambem outro -HarbourRoot."
          }
@@ -1673,7 +1673,7 @@ function Initialize-HarbourSource {
       return $false
    }
 
-   Assert-Command -Name 'git.exe' -Hint 'Instale Git ou clone o Harbour manualmente e informe -HarbourRoot.'
+   Assert-Command -Name 'git' -Hint 'Instale Git ou clone o Harbour manualmente e informe -HarbourRoot.'
    New-Item -ItemType Directory -Force -Path $parent | Out-Null
 
    Write-Host "Clonando Harbour: $Repository"
