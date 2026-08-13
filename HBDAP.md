@@ -6,6 +6,15 @@
 [HBDAP](https://github.com/DNATechByNaldoDJ/hbdap) as a native Harbour contrib.
 Existing builds are unchanged unless `-WithHbdap` is supplied.
 
+When the operation includes the `install` target, `hb_compile` also builds
+`hbdap_adapter` and `hbdap_cli` with that profile's hbmk2, installs them into
+`out/<profile>/bin`, writes `out/<profile>/HBDAP_MANIFEST.json` with revisions
+and hashes, and runs a minimal public-API consumer. Repeat the check with:
+
+```powershell
+pwsh ./scripts/Test-OptionalContribs.ps1 -Profile zig -WithHbdap
+```
+
 ```powershell
 .\build-zig.ps1 -WithHbdap
 .\build-full-linux-wsl.ps1 -WithHbdap -IgnoreDependency qt

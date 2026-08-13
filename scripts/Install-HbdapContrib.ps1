@@ -116,6 +116,20 @@ try {
       }
    }
 
+   # Harbour contrib headers are installed from the project root. Normalize the
+   # standalone HBDAP layout (include/hbdap.ch) while staging it as a contrib so
+   # the installed hbdap.hbc remains usable outside the source checkout.
+   $stagedHeader = Join-Path $stagingRoot 'include\hbdap.ch'
+   Copy-HbdapFile -Source $stagedHeader -Destination (Join-Path $stagingRoot 'hbdap.ch')
+   foreach ($projectFileName in @('hbdap.hbp', 'hbdap.hbc')) {
+      $projectFile = Join-Path $stagingRoot $projectFileName
+      $projectContent = Get-Content -LiteralPath $projectFile -Raw
+      $projectContent = $projectContent.Replace('-Iinclude', '-I.')
+      $projectContent = $projectContent.Replace('incpaths=include', 'incpaths=.').Replace('include/hbdap.ch', 'hbdap.ch')
+      [System.IO.File]::WriteAllText($projectFile, $projectContent, [System.Text.UTF8Encoding]::new($false))
+   }
+   Remove-Item -LiteralPath (Join-Path $stagingRoot 'include') -Recurse -Force
+
    $revision = ''
    if (Test-Path -LiteralPath (Join-Path $HbdapRoot '.git')) {
       if (-not [string]::IsNullOrWhiteSpace($GitCommand)) {

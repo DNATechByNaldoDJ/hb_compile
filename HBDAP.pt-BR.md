@@ -6,6 +6,16 @@ O `hb_compile` pode incluir o [hbdap](https://github.com/DNATechByNaldoDJ/hbdap)
 como contrib opcional do Harbour. A integração é opt-in: nenhum build existente
 muda enquanto `-WithHbdap` não for informado.
 
+Quando a operação inclui o alvo `install`, o `hb_compile` também compila
+`hbdap_adapter` e `hbdap_cli` com o `hbmk2` do próprio perfil, instala ambos em
+`out/<perfil>/bin`, grava `out/<perfil>/HBDAP_MANIFEST.json` com revisões e
+hashes e executa um consumidor mínimo da API pública. A validação pode ser
+repetida separadamente com:
+
+```powershell
+pwsh ./scripts/Test-OptionalContribs.ps1 -Profile zig -WithHbdap
+```
+
 ## Uso
 
 ```powershell

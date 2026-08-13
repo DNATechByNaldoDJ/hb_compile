@@ -2411,6 +2411,7 @@ if ($exitCode -ne 0) {
 
 $hbmk2Failures = @(
    Select-String -LiteralPath $logPath -Pattern '^hbmk2(?:\[([^\]]+)\])?:\s+(?:Erro|Error):' |
+      Where-Object { $_.Line -notmatch '(?i)(Missing dependency|Depend.ncia (?:ausente|n.o encontrada))' } |
       ForEach-Object {
          if ($_.Matches[0].Groups[1].Success) { $_.Matches[0].Groups[1].Value } else { 'projeto desconhecido' }
       } |
@@ -2418,6 +2419,51 @@ $hbmk2Failures = @(
 )
 if ($hbmk2Failures.Count -gt 0) {
    throw "Build reportou falha de contrib via hbmk2 ($($hbmk2Failures -join ', ')), embora o make tenha retornado sucesso. Veja o log: $logPath"
+}
+
+if ($WithHbdap -and $targetList -contains 'install') {
+   if ($runnerState.Name -notin @('windows', 'wsl', 'docker')) {
+      Write-Warning "Instalacao das ferramentas HBDAP ainda nao e suportada no runner '$($runnerState.Name)'."
+   }
+   else {
+      $hbdapToolArgs = @{
+         InstallRoot = $installRoot
+         HbdapRoot = $HbdapRoot
+         HarbourRoot = $HarbourRoot
+         BuildProfile = $BuildProfile
+         Runner = $runnerState.Name
+      }
+      if ($runnerState.Name -eq 'wsl') {
+         $hbdapToolArgs.WslDistro = $WslDistro
+         $hbdapToolArgs.WslUser = $WslUser
+      }
+      elseif ($runnerState.Name -eq 'docker') {
+         $hbdapToolArgs.DockerImage = $runnerState.DockerImage
+      }
+      & (Join-Path $ProjectRoot 'scripts\Install-HbdapTools.ps1') @hbdapToolArgs
+      if (-not $?) { throw 'Falha ao instalar adapter/CLI do HBDAP.' }
+
+      $optionalTestArgs = @{ BuildProfile = $BuildProfile; WithHbdap = $true }
+      if ($runnerState.Name -eq 'wsl') {
+         $optionalTestArgs.WslDistro = $WslDistro
+         $optionalTestArgs.WslUser = $WslUser
+      }
+      elseif ($runnerState.Name -eq 'docker') {
+         $optionalTestArgs.DockerImage = $runnerState.DockerImage
+      }
+      & (Join-Path $ProjectRoot 'scripts\Test-OptionalContribs.ps1') @optionalTestArgs
+      if (-not $?) { throw 'Validacao opcional do HBDAP falhou.' }
+   }
+}
+
+if ($WithOpenAds -and $targetList -contains 'install') {
+   & (Join-Path $ProjectRoot 'scripts\Test-OptionalContribs.ps1') `
+      -BuildProfile $BuildProfile `
+      -WithOpenAds `
+      -WslDistro $WslDistro `
+      -WslUser $WslUser `
+      -DockerImage $(if ($runnerState.Name -eq 'docker') { $runnerState.DockerImage } else { '' })
+   if (-not $?) { throw 'Validacao opcional do OpenADS falhou.' }
 }
 
 if ($targetList -contains 'install') {
