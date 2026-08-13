@@ -53,6 +53,18 @@
 - [ ] Detect and fail early when the workspace volume disappears.
 - [ ] Document a local-workspace strategy for unreliable storage.
 
+## Harbour 3.2.1dev compatibility
+
+- [x] Make `-Jobs` control contrib parallelism as well, instead of allowing
+  `contrib/make.hb` to raise the limit implicitly to eight.
+- [x] Fix vcpkg OpenSSL and libmagic link names in Windows Zig builds.
+- [x] Treat `hbmk2: Erro/Error` diagnostics as build failures even when the
+  contrib make process returns exit code zero.
+- [x] Supply process-local Git `safe.directory` configuration on every runner,
+  without changing the user's global configuration, preserving `GIT_REVISION`.
+- [x] Incrementally validate the full Zig build at Harbour `6df4c08b98` with
+  two jobs, `hbssl`/`hbmagic`, and the `hello.prg` smoke test.
+
 ## Coordinated path with HBDAP and the VSCode extension
 
 1. Make optional-contrib validation reusable, starting with artifact checks and

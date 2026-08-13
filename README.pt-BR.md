@@ -67,6 +67,12 @@ Ver o comando sem compilar:
 .\build-zig.ps1 -DryRun
 ```
 
+O valor de `-Jobs` vale tanto para o `make` principal quanto para o `hbmk2` que
+compila as contribs. O executor também aplica ajustes locais idempotentes de
+compatibilidade ao checkout do Harbour e aborta se o log registrar um erro do
+`hbmk2`, mesmo que o `make` retorne sucesso. Esses ajustes não modificam a
+configuração Git global do usuário.
+
 Incluir opcionalmente o hbdap no build nativo de contribs:
 
 ```powershell

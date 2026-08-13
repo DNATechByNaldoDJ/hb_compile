@@ -42,6 +42,11 @@ limitations are documented in [BUILD-SANDBOX.md](BUILD-SANDBOX.md).
 .\build-zig.ps1 -Clean
 ```
 
+`-Jobs` controls both the outer make process and the hbmk2 contrib build. The
+runner also applies idempotent compatibility adjustments to the Harbour
+checkout and fails when the log reports an hbmk2 error even if make exits
+successfully. These adjustments do not modify the user's global Git settings.
+
 Opt in to HBDAP as a native Harbour contrib:
 
 ```powershell

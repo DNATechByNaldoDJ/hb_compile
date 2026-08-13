@@ -57,6 +57,19 @@
 - [ ] Documentar uma estratégia de workspace local para disco externo, VHD,
   BitLocker ou compartilhamento instável.
 
+## Compatibilidade com o Harbour 3.2.1dev
+
+- [x] Fazer `-Jobs` controlar também o paralelismo interno das contribs, sem
+  deixar o `contrib/make.hb` elevar implicitamente o limite para oito.
+- [x] Corrigir os nomes de vínculo de OpenSSL e libmagic vindos do vcpkg nos
+  builds Windows com Zig.
+- [x] Tratar mensagens `hbmk2: Erro/Error` como falha do build mesmo quando o
+  `make` de contribs retorna código zero.
+- [x] Fornecer `safe.directory` local ao processo Git em todos os runners, sem
+  alterar a configuração global do usuário, preservando `GIT_REVISION`.
+- [x] Validar incrementalmente o build full Zig com Harbour `6df4c08b98`, dois
+  jobs, contribs `hbssl`/`hbmagic` e execução de `hello.prg`.
+
 ## Caminho coordenado com HBDAP e a extensão VS Code
 
 1. Tornar reutilizável a validação de contribs opcionais, começando pela

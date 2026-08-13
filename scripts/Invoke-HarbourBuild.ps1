@@ -1785,6 +1785,12 @@ if (-not (Test-Path -LiteralPath $makefile) -and ($harbourSourceReady -or -not $
    throw "Makefile do Harbour nao encontrado: $makefile"
 }
 
+$harbourCompatibility = Join-Path $ProjectRoot 'scripts\Prepare-HarbourCompatibility.ps1'
+& $harbourCompatibility -HarbourRoot $HarbourRoot -DryRun:$DryRun
+if (-not $?) {
+   throw 'Falha ao preparar os ajustes de compatibilidade do Harbour.'
+}
+
 if ($WithHbdap) {
    if ([string]::IsNullOrWhiteSpace($HbdapRoot)) {
       $siblingHbdap = Join-Path (Split-Path -Parent $ProjectRoot) 'hbdap'
@@ -2140,9 +2146,9 @@ if (-not [string]::IsNullOrWhiteSpace($BuildParts)) {
 foreach ($key in $Env.Keys) {
    $envMap[$key] = [string] $Env[$key]
 }
+$envMap['HB_BUILD_JOBS'] = [string] $Jobs
 
-if (($runnerState.Name -eq 'cygwin' -or $runnerState.Name -eq 'msys') -and
-   -not $envMap.Contains('GIT_CONFIG_COUNT') -and
+if (-not $envMap.Contains('GIT_CONFIG_COUNT') -and
    [string]::IsNullOrWhiteSpace($env:GIT_CONFIG_COUNT)) {
    $envMap['GIT_CONFIG_COUNT'] = '2'
    $envMap['GIT_CONFIG_KEY_0'] = 'safe.directory'
@@ -2401,6 +2407,17 @@ else {
 
 if ($exitCode -ne 0) {
    throw "Build falhou com codigo $exitCode. Veja o log: $logPath"
+}
+
+$hbmk2Failures = @(
+   Select-String -LiteralPath $logPath -Pattern '^hbmk2(?:\[([^\]]+)\])?:\s+(?:Erro|Error):' |
+      ForEach-Object {
+         if ($_.Matches[0].Groups[1].Success) { $_.Matches[0].Groups[1].Value } else { 'projeto desconhecido' }
+      } |
+      Sort-Object -Unique
+)
+if ($hbmk2Failures.Count -gt 0) {
+   throw "Build reportou falha de contrib via hbmk2 ($($hbmk2Failures -join ', ')), embora o make tenha retornado sucesso. Veja o log: $logPath"
 }
 
 if ($targetList -contains 'install') {
