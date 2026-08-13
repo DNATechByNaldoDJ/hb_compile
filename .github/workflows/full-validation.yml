@@ -62,19 +62,20 @@ jobs:
       - name: Build full Harbour profile
         shell: pwsh
         run: |
-          $arguments = @(
-            '-IgnoreDependency', 'qt'
-          )
+          $parameters = @{
+            IgnoreDependency = @('qt')
+          }
           if ($env:SELECTED_INTEGRATION -in @('hbdap', 'hbdap-openads')) {
-            $arguments += @(
-              '-WithHbdap',
-              '-HbdapRoot', (Join-Path $env:GITHUB_WORKSPACE 'hbdap-source')
-            )
+            $parameters.WithHbdap = $true
+            $parameters.HbdapRoot = Join-Path $env:GITHUB_WORKSPACE 'hbdap-source'
           }
           if ($env:SELECTED_INTEGRATION -in @('openads', 'hbdap-openads')) {
-            $arguments += '-WithOpenAds'
+            $parameters.WithOpenAds = $true
           }
-          ./build-full-linux-docker.ps1 @arguments
+          ./scripts/Invoke-HarbourBuild.ps1 `
+            -Profile linux-docker `
+            -Full `
+            @parameters
 
       - name: Compile and run hello.prg
         shell: pwsh

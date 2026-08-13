@@ -4,6 +4,13 @@
 
 ## Integração contínua
 
+- [ ] Restabelecer a validação Docker full agendada depois de corrigir o
+  encaminhamento dos parâmetros nomeados PowerShell para
+  `-IgnoreDependency qt`; concluir este item depois de uma execução remota
+  aprovada.
+- [ ] Substituir o encaminhamento `@args` cru dos wrappers de nível superior
+  por parâmetros nomeados tipados, mantendo seguro o splatting de hashtable
+  fora da CI.
 - [x] Validar PowerShell, configurações JSON, build Docker mínimo e
   `hello.prg` em pushes e pull requests.
 - [x] Oferecer validação Docker full agendada/manual com modos opcionais para

@@ -4,6 +4,11 @@
 
 ## Continuous integration
 
+- [ ] Restore the scheduled full Docker validation after fixing named
+  PowerShell parameter forwarding for `-IgnoreDependency qt`; close this item
+  after a successful remote run.
+- [ ] Replace the top-level wrappers' raw `@args` forwarding with typed named
+  parameter forwarding so hashtable splatting remains safe outside CI.
 - [x] Validate PowerShell, JSON configuration, a minimal Docker build, and
   `hello.prg` on pushes and pull requests.
 - [x] Provide scheduled/manual full Docker validation with optional HBDAP and
