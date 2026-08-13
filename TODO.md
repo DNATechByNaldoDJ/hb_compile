@@ -4,9 +4,9 @@
 
 ## Continuous integration
 
-- [ ] Restore the scheduled full Docker validation after fixing named
-  PowerShell parameter forwarding for `-IgnoreDependency qt`; close this item
-  after a successful remote run.
+- [x] Restore the scheduled full Docker validation after fixing named
+  PowerShell parameter forwarding for `-IgnoreDependency qt`. Manual run
+  `31702395638` and the push CI run `31702377181` passed on 2026-08-13.
 - [ ] Replace the top-level wrappers' raw `@args` forwarding with typed named
   parameter forwarding so hashtable splatting remains safe outside CI.
 - [x] Validate PowerShell, JSON configuration, a minimal Docker build, and
@@ -52,3 +52,14 @@
 - [ ] Allow logs to reside on a volume separate from the workspace.
 - [ ] Detect and fail early when the workspace volume disappears.
 - [ ] Document a local-workspace strategy for unreliable storage.
+
+## Coordinated path with HBDAP and the VSCode extension
+
+1. Make optional-contrib validation reusable, starting with artifact checks and
+   a minimal HBDAP consumer under the supported `hb_compile` profiles.
+2. Install and validate `hbdap_adapter` and `hbdap_cli`, then generate a joint
+   Harbour/HBDAP revision manifest.
+3. Feed reproducible build metadata and artifacts into the clean installation
+   test shared by HBDAP and the VSCode extension.
+4. Package only after the coordinated `v0.1.0-alpha.1` release candidate passes
+   the core, CLI, adapter, and packaged-VSIX workflows.

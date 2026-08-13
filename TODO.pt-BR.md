@@ -4,10 +4,10 @@
 
 ## Integração contínua
 
-- [ ] Restabelecer a validação Docker full agendada depois de corrigir o
+- [x] Restabelecer a validação Docker full agendada depois de corrigir o
   encaminhamento dos parâmetros nomeados PowerShell para
-  `-IgnoreDependency qt`; concluir este item depois de uma execução remota
-  aprovada.
+  `-IgnoreDependency qt`. A execução manual `31702395638` e a CI do push
+  `31702377181` foram aprovadas em 2026-08-13.
 - [ ] Substituir o encaminhamento `@args` cru dos wrappers de nível superior
   por parâmetros nomeados tipados, mantendo seguro o splatting de hashtable
   fora da CI.
@@ -56,3 +56,15 @@
 - [ ] Detectar e abortar cedo quando o volume do workspace desaparecer.
 - [ ] Documentar uma estratégia de workspace local para disco externo, VHD,
   BitLocker ou compartilhamento instável.
+
+## Caminho coordenado com HBDAP e a extensão VS Code
+
+1. Tornar reutilizável a validação de contribs opcionais, começando pela
+   conferência dos artefatos e por um consumidor HBDAP mínimo nos perfis
+   suportados do `hb_compile`.
+2. Instalar e validar `hbdap_adapter` e `hbdap_cli`, produzindo depois um
+   manifesto conjunto das revisões Harbour/HBDAP.
+3. Entregar metadados e artefatos reproduzíveis ao teste de instalação limpa
+   compartilhado pelo HBDAP e pela extensão VS Code.
+4. Empacotar somente depois que o candidato coordenado a
+   `v0.1.0-alpha.1` passar pelos fluxos do core, CLI, adapter e VSIX empacotado.
