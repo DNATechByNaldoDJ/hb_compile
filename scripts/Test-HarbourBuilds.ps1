@@ -14,6 +14,9 @@ param(
    [ValidateRange(1, 86400)]
    [int] $TimeoutSeconds = 300,
    [switch] $CompileOnly,
+   [ValidateSet('None', 'Smoke', 'Full')]
+   [string] $HbdapValidation = 'None',
+   [string] $HbdapRoot = '',
    [switch] $DryRun,
    [switch] $SkipToolBootstrap,
    [switch] $Internal
@@ -527,13 +530,15 @@ if (-not $Internal -and ($All -or $requestedProfiles.Count -ne 1)) {
       throw 'Nenhum build Harbour instalado foi encontrado em out\.'
    }
 
-   $powerShell = (Get-Command 'powershell.exe' -ErrorAction Stop).Source
+   $powerShell = (Get-Command 'pwsh' -ErrorAction Stop).Source
    $results = New-Object System.Collections.Generic.List[object]
    foreach ($name in $requestedProfiles) {
       Write-Host ''
       Write-Host "===== $name ====="
       $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '-Profile', $name, '-Internal')
       if ($CompileOnly) { $childArgs += '-CompileOnly' }
+      if ($HbdapValidation -ne 'None') { $childArgs += @('-HbdapValidation', $HbdapValidation) }
+      if (-not [string]::IsNullOrWhiteSpace($HbdapRoot)) { $childArgs += @('-HbdapRoot', $HbdapRoot) }
       if ($DryRun) { $childArgs += '-DryRun' }
       if ($SkipToolBootstrap) { $childArgs += '-SkipToolBootstrap' }
       if (-not [string]::IsNullOrWhiteSpace($CygwinPath)) { $childArgs += @('-CygwinPath', $CygwinPath) }
@@ -581,4 +586,17 @@ if ($requestedProfiles.Count -ne 1) {
 }
 
 Invoke-SingleBuildTest -Name $requestedProfiles[0]
+if ($HbdapValidation -ne 'None') {
+   $optionalArgs = @{
+      BuildProfile = $requestedProfiles[0]
+      WithHbdap = $true
+      HbdapValidation = $HbdapValidation
+      DryRun = $DryRun
+   }
+   if (-not [string]::IsNullOrWhiteSpace($HbdapRoot)) { $optionalArgs.HbdapRoot = $HbdapRoot }
+   if (-not [string]::IsNullOrWhiteSpace($WslDistro)) { $optionalArgs.WslDistro = $WslDistro }
+   if (-not [string]::IsNullOrWhiteSpace($WslUser)) { $optionalArgs.WslUser = $WslUser }
+   if (-not [string]::IsNullOrWhiteSpace($DockerImage)) { $optionalArgs.DockerImage = $DockerImage }
+   & (Join-Path $PSScriptRoot 'Test-OptionalContribs.ps1') @optionalArgs
+}
 Write-Host "Teste concluido: $($requestedProfiles[0])"

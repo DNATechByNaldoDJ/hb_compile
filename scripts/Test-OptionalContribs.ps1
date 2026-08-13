@@ -3,6 +3,9 @@ param(
    [Alias('Profile')] [string] $BuildProfile = 'zig',
    [switch] $WithHbdap,
    [switch] $WithOpenAds,
+   [ValidateSet('Smoke', 'Full')]
+   [string] $HbdapValidation = 'Smoke',
+   [string] $HbdapRoot = '',
    [string] $WslDistro = '',
    [string] $WslUser = '',
    [string] $DockerImage = '',
@@ -21,6 +24,46 @@ $runner = if ($runnerProperty -and $runnerProperty.Value) { [string] $runnerProp
 $installRoot = Join-Path $ProjectRoot (Join-Path 'out' ([string] $profile.installSubdir))
 $hbmk2Relative = if ($runner -eq 'windows') { 'bin\hbmk2.exe' } else { 'bin\hbmk2' }
 $hbmk2 = Join-Path $installRoot $hbmk2Relative
+
+function Resolve-HbdapRoot {
+   if (-not [string]::IsNullOrWhiteSpace($HbdapRoot)) {
+      return [System.IO.Path]::GetFullPath($HbdapRoot)
+   }
+   $sibling = Join-Path (Split-Path -Parent $ProjectRoot) 'hbdap'
+   if (Test-Path -LiteralPath $sibling -PathType Container) {
+      return [System.IO.Path]::GetFullPath($sibling)
+   }
+   throw 'Checkout HBDAP nao encontrado. Informe -HbdapRoot para executar a suite completa.'
+}
+
+function Invoke-HbdapFullSuite {
+   $resolvedHbdapRoot = Resolve-HbdapRoot
+   $suite = Join-Path $resolvedHbdapRoot 'test-hb_compile.ps1'
+   if (-not (Test-Path -LiteralPath $suite -PathType Leaf)) {
+      throw "Suite HBDAP nao encontrada: $suite"
+   }
+
+   if ($runner -eq 'windows' -or -not [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+      [System.Runtime.InteropServices.OSPlatform]::Windows
+   )) {
+      & $suite -HbCompileRoot $ProjectRoot
+      if ($LASTEXITCODE -ne 0) { throw "Suite completa HBDAP falhou com codigo $LASTEXITCODE." }
+      return
+   }
+
+   if ($runner -eq 'wsl') {
+      $args = @()
+      if ($WslUser) { $args += @('--user', $WslUser) }
+      if ($WslDistro) { $args += @('-d', $WslDistro) }
+      $wslSuite = ([string] (& wsl.exe @args --exec wslpath -a -u $suite)).Trim()
+      $wslHbCompile = ([string] (& wsl.exe @args --exec wslpath -a -u $ProjectRoot)).Trim()
+      & wsl.exe @args --exec pwsh -NoProfile -File $wslSuite -HbCompileRoot $wslHbCompile
+      if ($LASTEXITCODE -ne 0) { throw "Suite completa HBDAP no WSL falhou com codigo $LASTEXITCODE." }
+      return
+   }
+
+   throw "Suite completa HBDAP para '$runner' deve rodar em host Linux com pwsh; o smoke continua disponivel neste host."
+}
 
 function Find-Artifact {
    param([string] $Pattern)
@@ -70,6 +113,11 @@ if ($WithHbdap) {
    }
    else { throw "Runner ainda nao suportado pelo smoke HBDAP: $runner" }
    Write-Host "PASS HBDAP: artefatos, manifesto e consumidor publico ($BuildProfile)"
+   if ($HbdapValidation -eq 'Full') {
+      if ($DryRun) { Write-Host "DryRun: executar suite completa HBDAP no runner $runner" }
+      else { Invoke-HbdapFullSuite }
+      Write-Host "PASS HBDAP FULL: core, transporte, adapter, CLI e corpus ($BuildProfile)"
+   }
 }
 
 if ($WithOpenAds) {

@@ -40,11 +40,13 @@
 - [x] Compile and run a minimal Harbour consumer of the public HBDAP API under
   supported profiles. Windows, Docker, and WSL passed with the current Harbour
   revision; the WSL clean build used two jobs and excluded Qt.
-- [ ] Integrate HBDAP's own test suite when its checkout is available.
+- [x] Integrate HBDAP's own test suite when its checkout is available, reusing
+  its canonical `test-hb_compile.ps1` entry point.
 - [x] Cover `hbdap_adapter` and `hbdap_cli` after they are installed into each
   `out/<profile>/bin`.
-- [ ] Expose these checks through the `Test-HarbourBuilds.ps1` matrix, keeping
-  compile/link, functional smoke, and full-suite results distinct.
+- [x] Expose these checks through the `Test-HarbourBuilds.ps1` matrix with
+  explicit `None`, `Smoke`, and `Full` levels, keeping compile/link, public
+  smoke, and full-suite results distinct.
 
 ## Linux and storage
 

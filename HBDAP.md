@@ -15,6 +15,19 @@ and hashes, and runs a minimal public-API consumer. Repeat the check with:
 pwsh ./scripts/Test-OptionalContribs.ps1 -Profile zig -WithHbdap
 ```
 
+Run the complete HBDAP-owned core, transport, adapter, CLI, and corpus suite
+through an installed profile with:
+
+```powershell
+pwsh ./scripts/Test-HarbourBuilds.ps1 -Profile zig `
+  -HbdapValidation Full -HbdapRoot ../hbdap
+```
+
+`-HbdapValidation Smoke` keeps artifact, manifest, and public-consumer
+validation only; `None` is the matrix default. WSL also accepts `-WslDistro`
+and `-WslUser`. A Docker profile runs the full suite directly on a Linux host
+with PowerShell 7; Windows hosts retain container smoke validation.
+
 ```powershell
 .\build-zig.ps1 -WithHbdap
 .\build-full-linux-wsl.ps1 -WithHbdap -IgnoreDependency qt
@@ -31,8 +44,8 @@ distribution sources into `contrib\hbdap`, adds `hbdap/hbdap.hbp` to
 `HBDAP_BUILD_INFO.json`. Harbour's own contrib build then compiles the library
 consistently across Windows, WSL, and Docker runners.
 
-The current integration covers the HBDAP library. Automatic installation of
-`hbdap_adapter` and `hbdap_cli`, integrated tests, and versioned packaging are
+The current integration covers the library, adapter, CLI, combined manifest,
+public smoke, and optional full HBDAP suite. Versioned packaging remains
 tracked in [TODO.md](TODO.md).
 
 Full builds are I/O intensive. Do not use an external, encrypted, virtual, or
