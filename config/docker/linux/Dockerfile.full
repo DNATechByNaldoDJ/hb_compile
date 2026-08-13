@@ -4,6 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     QT_SELECT=6
 
 ARG INSTALL_QT=1
+ARG POWERSHELL_VERSION=7.5.3
 
 RUN set -eux; \
     apt-get update; \
@@ -13,6 +14,7 @@ RUN set -eux; \
       build-essential \
       ca-certificates \
       cmake \
+      curl \
       file \
       git \
       make \
@@ -44,5 +46,20 @@ RUN set -eux; \
     fi; \
     apt-get install -y --no-install-recommends $packages; \
     rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    architecture="$(dpkg --print-architecture)"; \
+    case "$architecture" in \
+      amd64) powershell_architecture=x64 ;; \
+      arm64) powershell_architecture=arm64 ;; \
+      *) echo "Unsupported PowerShell architecture: $architecture" >&2; exit 1 ;; \
+    esac; \
+    install -d /opt/microsoft/powershell/7; \
+    curl -fsSL \
+      "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-${powershell_architecture}.tar.gz" \
+      | tar -xz -C /opt/microsoft/powershell/7; \
+    chmod +x /opt/microsoft/powershell/7/pwsh; \
+    ln -s /opt/microsoft/powershell/7/pwsh /usr/local/bin/pwsh; \
+    pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
 
 WORKDIR /workspace

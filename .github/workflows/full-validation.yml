@@ -80,11 +80,17 @@ jobs:
       - name: Compile and run hello.prg
         shell: pwsh
         run: |
-          ./scripts/Test-HarbourBuilds.ps1 `
-            -BuildProfile linux-docker `
-            -DockerImage hb-compile/linux:full `
-            -TimeoutSeconds 600 `
-            -Internal
+          $parameters = @{
+            BuildProfile = 'linux-docker'
+            DockerImage = 'hb-compile/linux:full'
+            TimeoutSeconds = 1800
+            Internal = $true
+          }
+          if ($env:SELECTED_INTEGRATION -in @('hbdap', 'hbdap-openads')) {
+            $parameters.HbdapValidation = 'Full'
+            $parameters.HbdapRoot = Join-Path $env:GITHUB_WORKSPACE 'hbdap-source'
+          }
+          ./scripts/Test-HarbourBuilds.ps1 @parameters
 
       - name: Verify requested optional contrib artifacts
         shell: pwsh

@@ -43,9 +43,7 @@ function Invoke-HbdapFullSuite {
       throw "Suite HBDAP nao encontrada: $suite"
    }
 
-   if ($runner -eq 'windows' -or -not [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
-      [System.Runtime.InteropServices.OSPlatform]::Windows
-   )) {
+   if ($runner -eq 'windows') {
       & $suite -HbCompileRoot $ProjectRoot
       if ($LASTEXITCODE -ne 0) { throw "Suite completa HBDAP falhou com codigo $LASTEXITCODE." }
       return
@@ -62,7 +60,46 @@ function Invoke-HbdapFullSuite {
       return
    }
 
-   throw "Suite completa HBDAP para '$runner' deve rodar em host Linux com pwsh; o smoke continua disponivel neste host."
+   if ($runner -ne 'docker' -and
+      -not [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+      [System.Runtime.InteropServices.OSPlatform]::Windows
+   )) {
+      $previousProfile = $env:HBDAP_HB_COMPILE_PROFILE
+      try {
+         $env:HBDAP_HB_COMPILE_PROFILE = $BuildProfile
+         & $suite -HbCompileRoot $ProjectRoot
+      }
+      finally {
+         $env:HBDAP_HB_COMPILE_PROFILE = $previousProfile
+      }
+      if ($LASTEXITCODE -ne 0) { throw "Suite completa HBDAP falhou com codigo $LASTEXITCODE." }
+      return
+   }
+
+   if ($runner -eq 'docker') {
+      if (-not $DockerImage) {
+         $fullImageProperty = $profile.PSObject.Properties['dockerFullImage']
+         $imageProperty = $profile.PSObject.Properties['dockerImage']
+         $DockerImage = if ($fullImageProperty -and $fullImageProperty.Value) {
+            [string] $fullImageProperty.Value
+         }
+         else { [string] $imageProperty.Value }
+      }
+      & docker run --rm `
+         -e HBDAP_HB_COMPILE_PROFILE=$BuildProfile `
+         -v "${ProjectRoot}:/workspace" `
+         -v "${resolvedHbdapRoot}:/hbdap" `
+         -w /workspace `
+         $DockerImage `
+         pwsh -NoLogo -NoProfile -File /hbdap/test-hb_compile.ps1 `
+         -HbCompileRoot /workspace
+      if ($LASTEXITCODE -ne 0) {
+         throw "Suite completa HBDAP no Docker falhou com codigo $LASTEXITCODE."
+      }
+      return
+   }
+
+   throw "Runner ainda nao suportado pela suite completa HBDAP: $runner"
 }
 
 function Find-Artifact {

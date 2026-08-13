@@ -26,8 +26,9 @@
 - [x] Registrar origem e revisão em `HBDAP_BUILD_INFO.json`.
 - [x] Instalar `hbdap_adapter` e `hbdap_cli` em `out/<perfil>/bin` nos runners
   Windows, WSL e Docker suportados.
-- [ ] Executar a suíte hbdap completa após builds Windows, WSL e Docker. O
-  consumidor público mínimo já é executado automaticamente.
+- [x] Executar a suíte hbdap completa após builds Windows, WSL e Docker. A
+  imagem Docker full inclui PowerShell 7 fixado e executa a suíte canônica
+  dentro do container; o consumidor público mínimo permanece automático.
 - [x] Produzir manifesto conjunto com revisões Harbour e hbdap, perfil, runner
   e hashes do adapter/CLI.
 - [ ] Empacotar Harbour + hbdap para o `v0.1.0-alpha`.

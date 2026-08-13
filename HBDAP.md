@@ -25,8 +25,9 @@ pwsh ./scripts/Test-HarbourBuilds.ps1 -Profile zig `
 
 `-HbdapValidation Smoke` keeps artifact, manifest, and public-consumer
 validation only; `None` is the matrix default. WSL also accepts `-WslDistro`
-and `-WslUser`. A Docker profile runs the full suite directly on a Linux host
-with PowerShell 7; Windows hosts retain container smoke validation.
+and `-WslUser`. The full Docker image contains a pinned PowerShell 7 runtime,
+so Docker profiles execute the canonical suite inside the container on both
+Windows and Linux hosts.
 
 ```powershell
 .\build-zig.ps1 -WithHbdap

@@ -23,8 +23,9 @@
 - [x] Record source and revision in `HBDAP_BUILD_INFO.json`.
 - [x] Install `hbdap_adapter` and `hbdap_cli` into supported Windows, WSL, and
   Docker profile `bin` directories.
-- [ ] Run the complete HBDAP suite after Windows, WSL, and Docker builds. The
-  minimal public consumer now runs automatically.
+- [x] Run the complete HBDAP suite after Windows, WSL, and Docker builds. The
+  Docker full image includes pinned PowerShell 7 and runs the canonical suite
+  inside the container; the minimal public consumer remains automatic.
 - [x] Generate a combined Harbour/HBDAP revision manifest with profile, runner,
   and adapter/CLI hashes.
 - [ ] Package Harbour plus HBDAP for `v0.1.0-alpha`.

@@ -26,8 +26,9 @@ pwsh ./scripts/Test-HarbourBuilds.ps1 -Profile zig `
 
 `-HbdapValidation Smoke` mantém apenas a validação de artefatos, manifesto e
 consumidor público; `None` é o padrão da matriz. No WSL podem ser informados
-`-WslDistro` e `-WslUser`. O perfil Docker executa a suíte completa diretamente
-em host Linux com PowerShell 7; em host Windows permanece o smoke no container.
+`-WslDistro` e `-WslUser`. A imagem Docker full contém uma versão fixada do
+PowerShell 7, portanto os perfis Docker executam a suíte canônica dentro do
+container tanto em hosts Windows quanto Linux.
 
 ## Uso
 
